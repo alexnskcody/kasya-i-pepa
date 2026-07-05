@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#ffe3c8">
+<title>Кася и Пепа 🐾</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ИГРОВАЯ СЦЕНА -->
+  <svg id="stage" viewBox="0 0 1200 1200" preserveAspectRatio="xMidYMid slice" aria-label="Комната с питомцами">
+    <defs>
+      <linearGradient id="wallGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#ffefdb"/>
+        <stop offset="1" stop-color="#ffddc0"/>
+      </linearGradient>
+      <linearGradient id="floorGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#eec292"/>
+        <stop offset="1" stop-color="#d99f68"/>
+      </linearGradient>
+      <radialGradient id="rugGrad" cx="0.5" cy="0.45" r="0.75">
+        <stop offset="0" stop-color="#ffd9e2"/>
+        <stop offset="1" stop-color="#f5b0c0"/>
+      </radialGradient>
+      <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#aee3ff"/>
+        <stop offset="1" stop-color="#e2f6ff"/>
+      </linearGradient>
+      <radialGradient id="sunHalo" cx="0.5" cy="0.5" r="0.5">
+        <stop offset="0" stop-color="#fff0a8" stop-opacity="0.9"/>
+        <stop offset="1" stop-color="#fff0a8" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="sofaGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#d7dbe4"/>
+        <stop offset="1" stop-color="#b9bfcd"/>
+      </linearGradient>
+      <radialGradient id="softShadow" cx="0.5" cy="0.5" r="0.5">
+        <stop offset="0" stop-color="#7a4b28" stop-opacity="0.30"/>
+        <stop offset="0.7" stop-color="#7a4b28" stop-opacity="0.14"/>
+        <stop offset="1" stop-color="#7a4b28" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="vignette" cx="0.5" cy="0.5" r="0.72">
+        <stop offset="0.72" stop-color="#5a2d16" stop-opacity="0"/>
+        <stop offset="1" stop-color="#5a2d16" stop-opacity="0.14"/>
+      </radialGradient>
+
+      <!-- палитры персонажей -->
+      <linearGradient id="catBodyGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#6d4630"/>
+        <stop offset="1" stop-color="#48291b"/>
+      </linearGradient>
+      <linearGradient id="catBellyGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#a5734e"/>
+        <stop offset="1" stop-color="#8a5b3c"/>
+      </linearGradient>
+      <radialGradient id="catFaceGrad" cx="0.5" cy="0.42" r="0.75">
+        <stop offset="0" stop-color="#57351f"/>
+        <stop offset="1" stop-color="#3c2115"/>
+      </radialGradient>
+      <radialGradient id="catIris" cx="0.5" cy="0.38" r="0.72">
+        <stop offset="0" stop-color="#ffe98a"/>
+        <stop offset="0.55" stop-color="#f4cf5e"/>
+        <stop offset="1" stop-color="#9fb955"/>
+      </radialGradient>
+      <linearGradient id="dogBodyGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#42414d"/>
+        <stop offset="1" stop-color="#232229"/>
+      </linearGradient>
+      <linearGradient id="dogFluffGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#55535f"/>
+        <stop offset="1" stop-color="#34333d"/>
+      </linearGradient>
+    </defs>
+
+    <!-- ═══ КОМНАТА ═══ -->
+    <g id="room">
+      <rect x="-100" y="-100" width="1400" height="760" fill="url(#wallGrad)"/>
+      <rect x="-100" y="628" width="1400" height="34" fill="#f6dcb9"/>
+      <rect x="-100" y="626" width="1400" height="5" fill="#e9c398" opacity="0.8"/>
+      <rect x="-100" y="660" width="1400" height="650" fill="url(#floorGrad)"/>
+      <g stroke="#c08a55" stroke-width="3" opacity="0.22">
+        <path d="M -60 760 L 1260 745"/>
+        <path d="M -60 900 L 1260 880"/>
+        <path d="M -60 1070 L 1260 1050"/>
+      </g>
+
+      <!-- окно с солнцем -->
+      <g id="window">
+        <rect x="158" y="98" width="344" height="420" rx="26" fill="#fffaf0" stroke="#eed9b8" stroke-width="6"/>
+        <rect x="180" y="120" width="300" height="376" rx="14" fill="url(#skyGrad)"/>
+        <circle cx="398" cy="212" r="86" fill="url(#sunHalo)"/>
+        <circle cx="398" cy="212" r="40" fill="#ffdf6f"/>
+        <circle cx="398" cy="212" r="40" fill="none" stroke="#ffd04a" stroke-width="5" opacity="0.6"/>
+        <g fill="#ffffff" opacity="0.92">
+          <ellipse cx="255" cy="270" rx="46" ry="18"/>
+          <ellipse cx="292" cy="258" rx="34" ry="15"/>
+          <ellipse cx="230" cy="400" rx="38" ry="14" opacity="0.8"/>
+        </g>
+        <rect x="322" y="120" width="12" height="376" fill="#fffaf0"/>
+        <rect x="180" y="300" width="300" height="12" fill="#fffaf0"/>
+        <rect x="150" y="510" width="360" height="20" rx="10" fill="#f2d9b4"/>
+        <path d="M 168 96 Q 200 300 156 520 L 120 520 Q 150 300 128 96 Z" fill="#bfe3d0"/>
+        <path d="M 492 96 Q 462 300 504 520 L 540 520 Q 512 300 532 96 Z" fill="#bfe3d0"/>
+        <!-- пылинки в луче солнца -->
+        <g class="motes" fill="#fff3c4">
+          <circle class="mote m1" cx="300" cy="330" r="5"/>
+          <circle class="mote m2" cx="360" cy="420" r="4"/>
+          <circle class="mote m3" cx="260" cy="480" r="4.5"/>
+          <circle class="mote m4" cx="420" cy="360" r="3.5"/>
+        </g>
+      </g>
+
+      <!-- диван с розовым пледом (как на фото) -->
+      <g id="sofa">
+        <rect x="30" y="424" width="560" height="160" rx="42" fill="url(#sofaGrad)"/>
+        <rect x="52" y="440" width="252" height="132" rx="30" fill="#e2e6ee"/>
+        <rect x="316" y="440" width="252" height="132" rx="30" fill="#e2e6ee"/>
+        <rect x="18" y="556" width="586" height="104" rx="30" fill="#c3c9d6"/>
+        <path d="M 30 570 Q 160 540 300 574 L 300 650 Q 150 662 34 648 Z" fill="#f6bdb0"/>
+        <path d="M 60 588 Q 160 566 285 592" fill="none" stroke="#e79f92" stroke-width="5" opacity="0.7"/>
+        <path d="M 52 616 Q 170 596 292 620" fill="none" stroke="#e79f92" stroke-width="5" opacity="0.5"/>
+        <circle cx="470" cy="560" r="44" fill="#fff3e0" stroke="#f2ddc0" stroke-width="6"/>
+      </g>
+
+      <!-- когтеточка-дерево (место побега кота) -->
+      <g id="cattree">
+        <ellipse cx="780" cy="782" rx="104" ry="26" fill="#d9c39c"/>
+        <ellipse cx="780" cy="774" rx="104" ry="26" fill="#eadbb8"/>
+        <rect x="757" y="472" width="46" height="304" fill="#ecd9b4"/>
+        <g stroke="#d3b98c" stroke-width="5">
+          <path d="M 757 496 H 803"/><path d="M 757 522 H 803"/><path d="M 757 548 H 803"/>
+          <path d="M 757 574 H 803"/><path d="M 757 600 H 803"/><path d="M 757 626 H 803"/>
+          <path d="M 757 652 H 803"/><path d="M 757 678 H 803"/><path d="M 757 704 H 803"/>
+          <path d="M 757 730 H 803"/><path d="M 757 756 H 803"/>
+        </g>
+        <ellipse cx="780" cy="472" rx="96" ry="27" fill="#d9c39c"/>
+        <ellipse cx="780" cy="462" rx="96" ry="26" fill="#f6e7c8"/>
+        <ellipse cx="780" cy="458" rx="72" ry="18" fill="#fff3da"/>
+        <!-- голубая пёрышковая игрушка, как на фото -->
+        <g id="feather-toy">
+          <path class="a-swing" d="M 858 468 q 6 34 -2 62" fill="none" stroke="#8b7a5e" stroke-width="3"/>
+          <g class="a-swing2">
+            <circle cx="853" cy="540" r="15" fill="#7fd4d4"/>
+            <circle cx="864" cy="530" r="10" fill="#9fe3e0"/>
+            <circle cx="845" cy="528" r="9" fill="#63c4c8"/>
+          </g>
+        </g>
+      </g>
+
+      <!-- кошачья травка в бирюзовом горшке -->
+      <g id="grasspot">
+        <path d="M 1058 704 L 1122 704 L 1114 756 L 1066 756 Z" fill="#2e7f8f"/>
+        <rect x="1052" y="694" width="76" height="16" rx="8" fill="#3d95a5"/>
+        <g stroke="#69c25e" stroke-width="7" stroke-linecap="round" fill="none">
+          <path d="M 1090 700 C 1088 660 1092 640 1078 616"/>
+          <path d="M 1078 700 C 1070 664 1058 648 1044 636"/>
+          <path d="M 1100 700 C 1108 660 1120 646 1132 630"/>
+          <path d="M 1068 700 C 1062 676 1050 668 1036 664"/>
+          <path d="M 1112 700 C 1118 672 1130 664 1146 660"/>
+        </g>
+        <g stroke="#8fdc7f" stroke-width="6" stroke-linecap="round" fill="none">
+          <path d="M 1086 700 C 1088 664 1080 646 1086 622"/>
+          <path d="M 1104 700 C 1104 668 1112 652 1108 632"/>
+        </g>
+      </g>
+
+      <!-- мягкий коврик -->
+      <ellipse cx="600" cy="886" rx="424" ry="152" fill="url(#rugGrad)"/>
+      <ellipse cx="600" cy="886" rx="424" ry="152" fill="none" stroke="#ffffff" stroke-width="7" stroke-dasharray="2 26" stroke-linecap="round" opacity="0.85"/>
+      <ellipse cx="600" cy="886" rx="360" ry="122" fill="none" stroke="#ff9fb6" stroke-width="4" opacity="0.5"/>
+    </g>
+
+    <!-- предметы и питомцы (сортируются по глубине из JS) -->
+    <g id="world"></g>
+
+    <!-- частицы и пузыри реплик -->
+    <g id="fx-layer"></g>
+
+    <rect x="-100" y="-100" width="1400" height="1400" fill="url(#vignette)" pointer-events="none"/>
+  </svg>
+
+  <!-- линии скорости во время погони -->
+  <div id="speedlines" class="hidden" aria-hidden="true"></div>
+
+  <!-- ═══ ИНТЕРФЕЙС ═══ -->
+  <div id="ui">
+    <div id="topbar">
+      <button id="btn-sound" class="icon-btn" aria-label="Звук">🔊</button>
+      <div id="meter" title="Дружбометр">
+        <div id="meter-heart">💗</div>
+        <div id="meter-track"><div id="meter-fill"></div></div>
+      </div>
+      <button id="btn-help" class="icon-btn" aria-label="Как играть">❓</button>
+    </div>
+
+    <div id="bottombar">
+      <div id="actions">
+        <button id="btn-beg" class="action-btn hidden">🥺 Служить</button>
+        <button id="btn-action" class="action-btn hidden">😼 БАП!</button>
+        <button id="btn-treat" class="action-btn">🍪 Вкусняшка</button>
+      </div>
+      <div id="mode-switch">
+        <button class="mode-btn" data-mode="cat">
+          <span class="mode-face" id="face-cat"></span><span class="mode-label">Кася</span>
+        </button>
+        <button class="mode-btn active" data-mode="both">
+          <span class="mode-face mode-heart">💞</span><span class="mode-label">Вместе</span>
+        </button>
+        <button class="mode-btn" data-mode="dog">
+          <span class="mode-face" id="face-dog"></span><span class="mode-label">Пепа</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ ПОМОЩЬ ═══ -->
+  <div id="help" class="overlay hidden">
+    <div class="help-card">
+      <h2>Как играть 🐾</h2>
+      <div class="help-row"><span class="help-ico">👆🐱</span><span>Потыкай и погладь питомцев</span></div>
+      <div class="help-row"><span class="help-ico">👆🟢</span><span>В режиме героя тапай по полу — он побежит</span></div>
+      <div class="help-row"><span class="help-ico">😼💥</span><span>Кнопка «БАП!» — Кася задирается, начнутся догонялки!</span></div>
+      <div class="help-row"><span class="help-ico">🐶🍪</span><span>Угощай вкусняшками и кидай мячик</span></div>
+      <div class="help-row"><span class="help-ico">💗✨</span><span>Наполни сердечко дружбы — будет салют!</span></div>
+      <button class="big-btn" id="btn-help-close">Понятно!</button>
+    </div>
+  </div>
+
+  <!-- ═══ СПЛЭШ ═══ -->
+  <div id="splash" class="overlay">
+    <div class="splash-card">
+      <div class="splash-faces">
+        <span id="splash-cat" class="splash-face bounce1"></span>
+        <span class="splash-heart">💞</span>
+        <span id="splash-dog" class="splash-face bounce2"></span>
+      </div>
+      <h1>Кася <small>и</small> Пепа</h1>
+      <p>потыкай · погладь · поиграй</p>
+      <button id="btn-play" class="big-btn pulse">▶ Играть!</button>
+    </div>
+  </div>
+
+</div>
+
+<script src="js/audio.js"></script>
+<script src="js/fx.js"></script>
+<script src="js/art-cat.js"></script>
+<script src="js/art-dog.js"></script>
+<script src="js/pet.js"></script>
+<script src="js/director.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
