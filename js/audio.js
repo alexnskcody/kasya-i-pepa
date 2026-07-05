@@ -225,55 +225,25 @@
         return 'data:audio/wav;base64,' + btoa(bin);
       };
 
-      /* полный спрайт (рендерится один раз, 16 кГц float) */
-      this._spr = null;
-      const renderSprite = () => {
-        if (this._spr) return this._spr;
-        const parts = DEFS.map((d) => [d[0], d[1]()]);
-        let total = Math.round(0.1 * RATE);
-        parts.forEach((p) => { total += p[1].length + Math.round(GAP * RATE); });
-        const all = new Float32Array(total);
-        const offs = {};
-        let pos = Math.round(0.05 * RATE);
-        parts.forEach((p) => {
-          all.set(p[1], pos);
-          offs[p[0]] = [pos / RATE, p[1].length / RATE];
-          pos += p[1].length + Math.round(GAP * RATE);
-        });
-        this._spr = { all, offs };
-        return this._spr;
-      };
-
-      /* ── каскад стратегий ──
-         A: спрайт blob-URL (без лимита размера data:)
-         B: спрайт 8 кГц data-URI (~в 4 раза меньше)
-         C: «звук в жесте»: очередь, мелкие data-URI, play строго в активации */
-      this._fbMode = 'A';
-      this._fbErr = null;
-      this._poolMode = null;
-      this._pool = [];
-      this._fbQueue = [];
+      /* ── Lockdown-совместимое воспроизведение ──
+         Факты с устройства: blob-медиа заблокированы, большие data:-URI
+         (230КБ+) отклоняются, крошечный data:WAV играет. Поэтому каждый
+         звук — отдельный маленький data:-URI; длинные звуки ужимаются
+         до 8 кГц. Если iOS запрещает программный play вне жеста —
+         переходим в режим очереди: звук выйдет в следующем касании. */
       this._fbURIs = {};
-
-      const spriteURI = (mode) => {
-        const s = renderSprite();
-        if (mode === 'A') {
-          if (!this._blobURL) this._blobURL = URL.createObjectURL(new Blob([wavBuf(s.all, RATE)], { type: 'audio/wav' }));
-          return this._blobURL;
-        }
-        if (!this._data8) {
-          const half = new Float32Array(Math.floor(s.all.length / 2));
-          for (let i = 0; i < half.length; i++) half[i] = s.all[i * 2];
-          this._data8 = toDataURI(wavBuf(half, RATE / 2));
-        }
-        return this._data8;
-      };
-
       const soundURI = (name) => {
         if (!this._fbURIs[name]) {
           const fn = RMAP[name];
           if (!fn) return null;
-          this._fbURIs[name] = toDataURI(wavBuf(fn(), RATE));
+          let d = fn();
+          let rate = RATE;
+          if (d.length > RATE * 0.8) { // длинные — вдвое легче
+            const h = new Float32Array(Math.floor(d.length / 2));
+            for (let i = 0; i < h.length; i++) h[i] = d[i * 2];
+            d = h; rate = RATE / 2;
+          }
+          this._fbURIs[name] = toDataURI(wavBuf(d, rate));
         }
         return this._fbURIs[name];
       };
@@ -287,93 +257,87 @@
         return a;
       };
 
-      const advance = () => {
-        this._fbMode = this._fbMode === 'A' ? 'B' : 'C';
-        this._fbErr = null;
-        this._pool.forEach((a) => { try { a.pause(); } catch (e) {} });
-        this._pool = [];
-        this._poolMode = null;
-      };
+      this._pool = [];
+      this._fbQueue = [];
+      this._needGesture = false;
+      const silentURI = this._silentURI();
 
-      // построить/перестроить пул под текущую стратегию (вызывается В ЖЕСТЕ)
-      const ensurePool = () => {
-        if (this._fbMode === 'C') return;
-        if (this._pool.length && this._poolMode === this._fbMode) return;
-        let uri;
-        try { uri = spriteURI(this._fbMode); }
-        catch (e) { this._fbErr = 'build:' + e.message; advance(); return; }
-        this._pool.forEach((a) => { try { a.pause(); } catch (e) {} });
-        this._pool = [];
-        this._poolMode = this._fbMode;
-        const offs = this._spr.offs;
-        for (let i = 0; i < 5; i++) {
-          const a = mkEl(uri);
-          const p = a.play(); // в жесте: разблокировка сразу со спрайтом
-          if (p && p.then) {
-            p.then(() => { a._ok = true; if (!a._keep) a.pause(); })
-              .catch((e) => { this._fbErr = 'unlock' + this._poolMode + ':' + (e && e.name); });
-          }
+      const ensurePool = () => { // вызывается в жесте
+        if (this._pool.length) return;
+        for (let i = 0; i < 6; i++) {
+          const a = mkEl(silentURI);
+          const p = a.play(); // разблокировка элемента
+          if (p && p.then) p.then(() => { if (!a._busy) a.pause(); }).catch(() => {});
           this._pool.push(a);
         }
-        this._offsets = offs;
       };
 
-      const playSprite = (name) => {
-        if (!this._pool.length || !this._offsets) return false;
-        const seg = this._offsets[name];
-        if (!seg) return false;
-        const a = this._pool.find((x) => x.paused && x !== this._purrEl);
-        if (!a) return false;
+      const qPush = (name) => {
+        if (name === 'step' || name === 'purr') return;
+        if (this._fbQueue.length > 3) this._fbQueue.shift();
+        this._fbQueue.push({ name, t: Date.now() });
+      };
+
+      const playNow = (name, el) => {
+        const uri = soundURI(name);
+        if (!uri) return false;
         try {
-          clearTimeout(a._stopT);
-          a.currentTime = seg[0];
-          const p = a.play();
-          if (p && p.catch) p.catch((e) => { this._fbErr = 'play:' + (e && e.name); });
-          a._stopT = setTimeout(() => { try { a.pause(); } catch (e2) {} }, seg[1] * 1000 + 80);
+          el._busy = true;
+          clearTimeout(el._bt);
+          el._bt = setTimeout(() => { el._busy = false; }, 3500);
+          el.loop = false;
+          el.src = uri;
+          el.onended = () => { el._busy = false; };
+          const p = el.play();
+          if (p && p.then) {
+            p.then(() => { this._fbOk = true; })
+              .catch((e) => {
+                el._busy = false;
+                const nm = (e && e.name) || 'err';
+                this._fbErr = 'play:' + nm;
+                if (nm === 'NotAllowedError') {
+                  this._needGesture = true; // дальше — только в тапах
+                  qPush(name);
+                }
+              });
+          }
           return true;
         } catch (e) {
-          this._fbErr = 'seek:' + e.message;
+          el._busy = false;
+          this._fbErr = 'src:' + e.message;
           return false;
         }
       };
 
-      // очередь «звука в жесте» — флашится в unlock() внутри активации
-      const qPush = (name) => {
-        if (name === 'step') return; // шаги не копим
-        if (this._fbQueue.length > 3) this._fbQueue.shift();
-        this._fbQueue.push({ name, t: Date.now() });
-      };
-      this._gestureEls = [mkEl(), mkEl()];
-      this._fbFlush = () => {
-        const now = Date.now();
-        this._fbQueue = this._fbQueue.filter((q) => now - q.t < 1500);
-        for (const g of this._gestureEls) {
-          if (!this._fbQueue.length) break;
-          if (!g.paused) continue;
-          const q = this._fbQueue.shift();
-          const uri = soundURI(q.name);
-          if (!uri) continue;
-          try {
-            g.src = uri;
-            const p = g.play(); // мы в активации — разрешено всегда
-            if (p && p.catch) p.catch((e) => { this._fbErr = 'gest:' + (e && e.name); });
-          } catch (e) { this._fbErr = 'gest:' + e.message; }
-        }
-      };
+      const freeEl = () =>
+        this._pool.find((x) => x.paused && !x._busy && x !== this._purrEl) ||
+        this._pool.find((x) => x.paused && x !== this._purrEl);
 
       const request = (name) => {
         if (this.muted) return;
-        if (this._fbMode !== 'C' && playSprite(name)) return;
-        qPush(name);
+        if (!this._pool.length || this._needGesture) { qPush(name); return; }
+        const el = freeEl();
+        if (!el) { qPush(name); return; }
+        playNow(name, el);
       };
 
-      // вызывается из unlock() при каждом касании (внутри активации)
+      this._fbFlush = () => { // в активации играть можно всегда
+        const now = Date.now();
+        this._fbQueue = this._fbQueue.filter((q) => now - q.t < 1500);
+        let n = 0;
+        while (this._fbQueue.length && n < 2) {
+          const el = freeEl();
+          if (!el) break;
+          playNow(this._fbQueue.shift().name, el);
+          n++;
+        }
+      };
+
       this._fbUnlock = () => {
-        if (this._fbErr && this._fbMode !== 'C') advance();
         ensurePool();
         if (!this._helloDone) {
           this._helloDone = true;
-          request('chime_hello');
+          qPush('chime_hello');
         }
         this._fbFlush();
       };
@@ -385,7 +349,7 @@
       this.snort = () => request('snort');
       this.pant = () => request('pant');
       this.boing = () => request('boing');
-      this.step = () => { if (this._fbMode !== 'C') request('step'); };
+      this.step = () => { if (!this._needGesture) request('step'); };
       this.crunch = () => request('crunch');
       this.lap = () => request('lap');
       this.nibble = () => request('nibble');
@@ -401,32 +365,31 @@
       };
       this.fanfare = () => request('fanfare');
       this.purrStart = () => {
-        if (this._purrOn || this._fbMode === 'C' || !this._offsets) return;
-        const seg = this._offsets.purr;
-        const a = this._pool.find((x) => x.paused);
-        if (!seg || !a) return;
+        if (this._purrOn || this._needGesture || !this._pool.length) return;
+        const el = freeEl();
+        const uri = soundURI('purr');
+        if (!el || !uri) return;
         this._purrOn = true;
-        this._purrEl = a;
-        a._keep = true;
-        const cycle = () => {
-          if (!this._purrOn) return;
-          try {
-            a.currentTime = seg[0];
-            const p = a.play();
-            if (p && p.catch) p.catch(() => {});
-          } catch (e) { /* пропустим цикл */ }
-        };
-        cycle();
-        this._purrIv = setInterval(cycle, (seg[1] - 0.12) * 1000);
+        this._purrEl = el;
+        el._busy = true;
+        try {
+          el.src = uri;
+          el.loop = true;
+          const p = el.play();
+          if (p && p.catch) p.catch(() => {
+            this._purrOn = false; this._purrEl = null; el._busy = false;
+          });
+        } catch (e) {
+          this._purrOn = false; this._purrEl = null; el._busy = false;
+        }
       };
       this.purrStop = () => {
-        this._purrOn = false;
-        clearInterval(this._purrIv);
         if (this._purrEl) {
-          this._purrEl._keep = false;
-          try { this._purrEl.pause(); } catch (e) {}
+          try { this._purrEl.pause(); this._purrEl.loop = false; } catch (e) {}
+          this._purrEl._busy = false;
           this._purrEl = null;
         }
+        this._purrOn = false;
       };
       this.resume = () => {};
     },
@@ -482,8 +445,11 @@
         muted: this.muted,
         AC: ('AudioContext' in window) || ('webkitAudioContext' in window),
         fb: this.fallback
-          ? ('реж:' + this._fbMode + ' pool:' + (this._pool ? this._pool.length : 0) +
+          ? ('pool:' + (this._pool ? this._pool.length : 0) +
+            ' кэш:' + Object.keys(this._fbURIs || {}).length +
             ' очередь:' + (this._fbQueue ? this._fbQueue.length : 0) +
+            (this._needGesture ? ' ЖЕСТ-РЕЖИМ' : '') +
+            (this._fbOk ? ' ok' : '') +
             (this._fbErr ? ' ERR:' + this._fbErr : ''))
           : 'выкл',
       };
