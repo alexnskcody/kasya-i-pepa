@@ -37,13 +37,16 @@
       this._makeBall();
     },
 
-    /* ── границы пола ── */
+    /* ── границы пола (не заходит под панели интерфейса) ── */
     floorRect() {
+      const uiBot = (this.vr.uiBot != null ? this.vr.uiBot : this.vr.y1);
+      const y0 = Math.max(676, this.vr.y0 + 60);
+      let y1 = Math.min(1000, this.vr.y1 - 60, uiBot - 34);
+      if (y1 < y0 + 40) y1 = y0 + 40; // страховка на крошечных экранах
       return {
         x0: this.vr.x0 + 80,
         x1: this.vr.x1 - 80,
-        y0: Math.max(676, this.vr.y0 + 60),
-        y1: Math.min(1000, this.vr.y1 - 60),
+        y0, y1,
       };
     },
     randFloor(pad) {

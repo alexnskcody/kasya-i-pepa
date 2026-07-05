@@ -20,7 +20,7 @@
   });
   const dog = new Pet({
     id: 'dog', name: 'Пепа', art: DogArt, base: 1.02,
-    x: 706, y: 906, facing: -1, pose: 'sit', world,
+    x: 706, y: 868, facing: -1, pose: 'sit', world,
     speedWalk: 96, speedRun: 305,
     heights: { sit: 172, beg: 198, walk: 152, sleep: 62, sniff: 104 },
   });
@@ -54,14 +54,30 @@
     if (!w || !h) { w = 1200; h = 1200; }
     const sc = Math.max(w / 1200, h / 1200);
     const vw = w / sc, vh = h / sc;
+    const y0 = (1200 - vh) / 2;
+    // панели интерфейса не должны накрывать питомцев:
+    // переводим их края из CSS-пикселей в координаты сцены
+    let uiBot = y0 + vh;
+    const bb = document.getElementById('bottombar');
+    if (bb) {
+      const r = bb.getBoundingClientRect();
+      if (r.height > 0) uiBot = y0 + r.top / sc;
+    }
     Director.vr = {
       x0: (1200 - vw) / 2, x1: (1200 + vw) / 2,
-      y0: (1200 - vh) / 2, y1: (1200 + vh) / 2,
+      y0, y1: y0 + vh,
+      uiBot,
     };
   }
   updateVR();
+  Director.refit();
   addEventListener('resize', () => { updateVR(); Director.refit(); });
   addEventListener('orientationchange', () => setTimeout(() => { updateVR(); Director.refit(); }, 250));
+  // панель меняет высоту, когда появляются кнопки действий
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => { updateVR(); Director.refit(); })
+      .observe(document.getElementById('bottombar'));
+  }
 
   /* координаты указателя в системе сцены */
   function toStage(evt) {
