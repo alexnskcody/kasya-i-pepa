@@ -179,9 +179,10 @@
   // диагностика звука: открыть игру с ?debug=1
   if (/debug/.test(location.search)) {
     const d = document.createElement('div');
-    d.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99;' +
+    d.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99;max-width:94vw;' +
       'background:rgba(0,0,0,.72);color:#7f7;font:12px/1.5 monospace;' +
-      'padding:6px 9px;border-radius:8px;pointer-events:none;white-space:pre';
+      'padding:6px 9px;border-radius:8px;pointer-events:none;' +
+      'white-space:pre-wrap;word-break:break-all';
     document.body.appendChild(d);
     setInterval(() => {
       const s = Snd.state();

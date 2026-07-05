@@ -196,10 +196,39 @@
         ['fanfare', fanfareR],
       ];
       const GAP = 0.3;
-      this._offsets = null;
-      this._spriteURI = null;
-      const buildSprite = () => {
-        if (this._spriteURI) return;
+      const RMAP = {};
+      DEFS.forEach((d) => { RMAP[d[0]] = d[1]; });
+
+      /* WAV-кодирование: полные сэмплы → ArrayBuffer */
+      const wavBuf = (data, rate) => {
+        const n = data.length;
+        const b = new ArrayBuffer(44 + n * 2);
+        const v = new DataView(b);
+        const wr = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+        wr(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); wr(8, 'WAVEfmt ');
+        v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+        v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
+        v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+        wr(36, 'data'); v.setUint32(40, n * 2, true);
+        for (let i = 0; i < n; i++) {
+          const s = Math.max(-1, Math.min(1, data[i] * 0.85));
+          v.setInt16(44 + i * 2, s * 32767, true);
+        }
+        return b;
+      };
+      const toDataURI = (ab) => {
+        const u8 = new Uint8Array(ab);
+        let bin = '';
+        for (let i = 0; i < u8.length; i += 0x8000) {
+          bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+        }
+        return 'data:audio/wav;base64,' + btoa(bin);
+      };
+
+      /* полный спрайт (рендерится один раз, 16 кГц float) */
+      this._spr = null;
+      const renderSprite = () => {
+        if (this._spr) return this._spr;
         const parts = DEFS.map((d) => [d[0], d[1]()]);
         let total = Math.round(0.1 * RATE);
         parts.forEach((p) => { total += p[1].length + Math.round(GAP * RATE); });
@@ -211,99 +240,174 @@
           offs[p[0]] = [pos / RATE, p[1].length / RATE];
           pos += p[1].length + Math.round(GAP * RATE);
         });
-        const n = all.length;
-        const b = new ArrayBuffer(44 + n * 2);
-        const v = new DataView(b);
-        const wr = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
-        wr(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); wr(8, 'WAVEfmt ');
-        v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-        v.setUint32(24, RATE, true); v.setUint32(28, RATE * 2, true);
-        v.setUint16(32, 2, true); v.setUint16(34, 16, true);
-        wr(36, 'data'); v.setUint32(40, n * 2, true);
-        for (let i = 0; i < n; i++) {
-          const s = Math.max(-1, Math.min(1, all[i] * 0.85));
-          v.setInt16(44 + i * 2, s * 32767, true);
-        }
-        const u8 = new Uint8Array(b);
-        let bin = '';
-        for (let i = 0; i < u8.length; i += 0x8000) {
-          bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
-        }
-        this._spriteURI = 'data:audio/wav;base64,' + btoa(bin);
-        this._offsets = offs;
+        this._spr = { all, offs };
+        return this._spr;
       };
 
+      /* ── каскад стратегий ──
+         A: спрайт blob-URL (без лимита размера data:)
+         B: спрайт 8 кГц data-URI (~в 4 раза меньше)
+         C: «звук в жесте»: очередь, мелкие data-URI, play строго в активации */
+      this._fbMode = 'A';
+      this._fbErr = null;
+      this._poolMode = null;
       this._pool = [];
-      this._fbUnlock = () => {
-        if (this._pool.length) return;
-        try { buildSprite(); } catch (e) { this._fbErr = 'build:' + e.message; return; }
+      this._fbQueue = [];
+      this._fbURIs = {};
+
+      const spriteURI = (mode) => {
+        const s = renderSprite();
+        if (mode === 'A') {
+          if (!this._blobURL) this._blobURL = URL.createObjectURL(new Blob([wavBuf(s.all, RATE)], { type: 'audio/wav' }));
+          return this._blobURL;
+        }
+        if (!this._data8) {
+          const half = new Float32Array(Math.floor(s.all.length / 2));
+          for (let i = 0; i < half.length; i++) half[i] = s.all[i * 2];
+          this._data8 = toDataURI(wavBuf(half, RATE / 2));
+        }
+        return this._data8;
+      };
+
+      const soundURI = (name) => {
+        if (!this._fbURIs[name]) {
+          const fn = RMAP[name];
+          if (!fn) return null;
+          this._fbURIs[name] = toDataURI(wavBuf(fn(), RATE));
+        }
+        return this._fbURIs[name];
+      };
+
+      const mkEl = (src) => {
+        const a = document.createElement('audio');
+        a.setAttribute('playsinline', '');
+        a.setAttribute('webkit-playsinline', '');
+        a.preload = 'auto';
+        if (src) a.src = src;
+        return a;
+      };
+
+      const advance = () => {
+        this._fbMode = this._fbMode === 'A' ? 'B' : 'C';
+        this._fbErr = null;
+        this._pool.forEach((a) => { try { a.pause(); } catch (e) {} });
+        this._pool = [];
+        this._poolMode = null;
+      };
+
+      // построить/перестроить пул под текущую стратегию (вызывается В ЖЕСТЕ)
+      const ensurePool = () => {
+        if (this._fbMode === 'C') return;
+        if (this._pool.length && this._poolMode === this._fbMode) return;
+        let uri;
+        try { uri = spriteURI(this._fbMode); }
+        catch (e) { this._fbErr = 'build:' + e.message; advance(); return; }
+        this._pool.forEach((a) => { try { a.pause(); } catch (e) {} });
+        this._pool = [];
+        this._poolMode = this._fbMode;
+        const offs = this._spr.offs;
         for (let i = 0; i < 5; i++) {
-          const a = document.createElement('audio');
-          a.setAttribute('playsinline', '');
-          a.setAttribute('webkit-playsinline', '');
-          a.preload = 'auto';
-          a.src = this._spriteURI;
-          const p = a.play(); // в жесте: элемент разблокируется сразу со спрайтом
+          const a = mkEl(uri);
+          const p = a.play(); // в жесте: разблокировка сразу со спрайтом
           if (p && p.then) {
-            p.then(() => { if (!a._ready) { a._ready = true; a.pause(); } })
-              .catch((e) => { this._fbErr = 'unlock:' + (e && e.name); });
+            p.then(() => { a._ok = true; if (!a._keep) a.pause(); })
+              .catch((e) => { this._fbErr = 'unlock' + this._poolMode + ':' + (e && e.name); });
           }
           this._pool.push(a);
         }
-        if (!this._hello) {
-          this._hello = true;
-          setTimeout(() => this.chime([1046, 1568]), 400);
-        }
+        this._offsets = offs;
       };
 
-      const play = (name) => {
-        if (this.muted || !this._pool.length || !this._offsets) return null;
+      const playSprite = (name) => {
+        if (!this._pool.length || !this._offsets) return false;
         const seg = this._offsets[name];
-        if (!seg) return null;
+        if (!seg) return false;
         const a = this._pool.find((x) => x.paused && x !== this._purrEl);
-        if (!a) return null;
+        if (!a) return false;
         try {
           clearTimeout(a._stopT);
           a.currentTime = seg[0];
           const p = a.play();
           if (p && p.catch) p.catch((e) => { this._fbErr = 'play:' + (e && e.name); });
           a._stopT = setTimeout(() => { try { a.pause(); } catch (e2) {} }, seg[1] * 1000 + 80);
+          return true;
         } catch (e) {
           this._fbErr = 'seek:' + e.message;
-          return null;
+          return false;
         }
-        return a;
+      };
+
+      // очередь «звука в жесте» — флашится в unlock() внутри активации
+      const qPush = (name) => {
+        if (name === 'step') return; // шаги не копим
+        if (this._fbQueue.length > 3) this._fbQueue.shift();
+        this._fbQueue.push({ name, t: Date.now() });
+      };
+      this._gestureEls = [mkEl(), mkEl()];
+      this._fbFlush = () => {
+        const now = Date.now();
+        this._fbQueue = this._fbQueue.filter((q) => now - q.t < 1500);
+        for (const g of this._gestureEls) {
+          if (!this._fbQueue.length) break;
+          if (!g.paused) continue;
+          const q = this._fbQueue.shift();
+          const uri = soundURI(q.name);
+          if (!uri) continue;
+          try {
+            g.src = uri;
+            const p = g.play(); // мы в активации — разрешено всегда
+            if (p && p.catch) p.catch((e) => { this._fbErr = 'gest:' + (e && e.name); });
+          } catch (e) { this._fbErr = 'gest:' + e.message; }
+        }
+      };
+
+      const request = (name) => {
+        if (this.muted) return;
+        if (this._fbMode !== 'C' && playSprite(name)) return;
+        qPush(name);
+      };
+
+      // вызывается из unlock() при каждом касании (внутри активации)
+      this._fbUnlock = () => {
+        if (this._fbErr && this._fbMode !== 'C') advance();
+        ensurePool();
+        if (!this._helloDone) {
+          this._helloDone = true;
+          request('chime_hello');
+        }
+        this._fbFlush();
       };
 
       /* подмена публичных методов */
-      this.meow = (kind) => { play(kind && ['mew', 'angry', 'squeak'].indexOf(kind) >= 0 ? kind : 'meow'); };
-      this.bark = (n, pitch) => { play('bark' + (n === 2 ? 2 : 1) + ((pitch || 1) > 1.12 ? 'h' : 'l')); };
-      this.whine = () => play('whine');
-      this.snort = () => play('snort');
-      this.pant = () => play('pant');
-      this.boing = () => play('boing');
-      this.step = () => play('step');
-      this.crunch = () => play('crunch');
-      this.lap = () => play('lap');
-      this.nibble = () => play('nibble');
-      this.pop = () => play('pop');
-      this.whoosh = () => play('whoosh');
-      this.snore = () => play('snore');
-      this.tweet = () => play('tweet');
-      this.rattle = () => play('rattle');
+      this.meow = (kind) => { request(kind && ['mew', 'angry', 'squeak'].indexOf(kind) >= 0 ? kind : 'meow'); };
+      this.bark = (n, pitch) => { request('bark' + (n === 2 ? 2 : 1) + ((pitch || 1) > 1.12 ? 'h' : 'l')); };
+      this.whine = () => request('whine');
+      this.snort = () => request('snort');
+      this.pant = () => request('pant');
+      this.boing = () => request('boing');
+      this.step = () => { if (this._fbMode !== 'C') request('step'); };
+      this.crunch = () => request('crunch');
+      this.lap = () => request('lap');
+      this.nibble = () => request('nibble');
+      this.pop = () => request('pop');
+      this.whoosh = () => request('whoosh');
+      this.snore = () => request('snore');
+      this.tweet = () => request('tweet');
+      this.rattle = () => request('rattle');
       this.chime = (notes) => {
         const f = (notes && notes[0]) || 1046;
-        play(f < 900 ? 'chime_mode' : f > 1400 ? 'chime_win'
+        request(f < 900 ? 'chime_mode' : f > 1400 ? 'chime_win'
           : (notes && notes.length === 2 ? 'chime_hello' : 'chime_std'));
       };
-      this.fanfare = () => play('fanfare');
+      this.fanfare = () => request('fanfare');
       this.purrStart = () => {
-        if (this._purrOn || !this._offsets) return;
+        if (this._purrOn || this._fbMode === 'C' || !this._offsets) return;
         const seg = this._offsets.purr;
         const a = this._pool.find((x) => x.paused);
         if (!seg || !a) return;
         this._purrOn = true;
         this._purrEl = a;
+        a._keep = true;
         const cycle = () => {
           if (!this._purrOn) return;
           try {
@@ -318,7 +422,11 @@
       this.purrStop = () => {
         this._purrOn = false;
         clearInterval(this._purrIv);
-        if (this._purrEl) { try { this._purrEl.pause(); } catch (e) {} this._purrEl = null; }
+        if (this._purrEl) {
+          this._purrEl._keep = false;
+          try { this._purrEl.pause(); } catch (e) {}
+          this._purrEl = null;
+        }
       };
       this.resume = () => {};
     },
@@ -374,8 +482,8 @@
         muted: this.muted,
         AC: ('AudioContext' in window) || ('webkitAudioContext' in window),
         fb: this.fallback
-          ? ('pool:' + (this._pool ? this._pool.length : 0) +
-            ' спрайт:' + (this._spriteURI ? Math.round(this._spriteURI.length / 1024) + 'КБ' : 'нет') +
+          ? ('реж:' + this._fbMode + ' pool:' + (this._pool ? this._pool.length : 0) +
+            ' очередь:' + (this._fbQueue ? this._fbQueue.length : 0) +
             (this._fbErr ? ' ERR:' + this._fbErr : ''))
           : 'выкл',
       };
