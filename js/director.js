@@ -5,6 +5,12 @@
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
+  /* Кормовая зона у стены: травка (только Кася) и поилка (оба) */
+  const FEED = {
+    grass: { x: 640, y: 704, stand: { x: 566, y: 752 } },
+    water: { x: 548, y: 714, stand: { x: 484, y: 742 } },
+  };
+
   /* Места, куда лазает кошка. safe — пёс не достанет (побег засчитан),
      на диване (safe:false) пёс догонит: у него есть своя точка dogSpot. */
   const SPOTS = {
@@ -258,6 +264,33 @@
       return list[0];
     },
 
+    /* подойти к травке/поилке и похрустеть/полакать */
+    _feedIdle(pet, st, kind) {
+      const spot = kind === 'grass' ? FEED.grass : FEED.water;
+      st.kind = kind;
+      st.until = 999;
+      this._feedBusy = pet.id;
+      this._feedNext = this.now + rand(35, 80);
+      st.cleanup = () => { this._feedBusy = null; };
+      pet.moveTo(spot.stand.x, spot.stand.y, {
+        cb: () => {
+          pet.setFacing(1);
+          pet.setPose(pet === this.cat ? 'sneak' : 'sniff');
+          const iv = setInterval(() => {
+            if (kind === 'grass') {
+              Snd.nibble();
+              FX.grassBits(spot.x, spot.y - 6);
+            } else {
+              Snd.lap();
+              FX.waterRipple(spot.x, spot.y - 6);
+            }
+          }, 750);
+          st.cleanup = () => { clearInterval(iv); this._feedBusy = null; };
+          st.until = rand(3.5, 6);
+        },
+      });
+    },
+
     _sleepIdle(pet, st, dur) {
       pet.setPose('sleep');
       pet.setSleeping(true);
@@ -280,10 +313,12 @@
         return;
       }
       const prev = st.kind;
+      const feedOk = !this._feedBusy && this.now > (this._feedNext || 0);
       const opts = [
         { k: 'sit', w: 2.4 }, { k: 'loaf', w: 1.4 }, { k: 'groom', w: 2.2 },
         { k: 'lieback', w: 2.2 }, { k: 'sleep', w: 1.3 }, { k: 'wander', w: 2.4 },
         { k: 'sofaNap', w: 0.8 }, { k: 'sillWatch', w: 0.8 },
+        ...(feedOk ? [{ k: 'grass', w: 1.1 }, { k: 'drink', w: 0.9 }] : []),
       ].filter(o => o.k !== prev);
       const k = this._pick(opts).k;
       st.kind = k;
@@ -305,6 +340,8 @@
         this.climbTo(pet, 'sill', {
           done: () => { st.until = rand(7, 12); },
         });
+      } else if (k === 'grass' || k === 'drink') {
+        this._feedIdle(pet, st, k);
       } else {
         pet.setPose(k);
         st.until = rand(4.5, 8);
@@ -314,9 +351,11 @@
 
     _dogIdle(pet, st) {
       const prev = st.kind;
+      const feedOk = !this._feedBusy && this.now > (this._feedNext || 0);
       const opts = [
         { k: 'watch', w: 3.4 }, { k: 'beg', w: 0.9 }, { k: 'sleep', w: 2.2 },
         { k: 'sniff', w: 2.4 }, { k: 'wander', w: 1.5 },
+        ...(feedOk ? [{ k: 'drink', w: 1.0 }] : []),
       ].filter(o => o.k !== prev);
       const k = this._pick(opts).k;
       st.kind = k;
@@ -347,6 +386,8 @@
         pet.el.classList.remove('running');
         const snIv = setInterval(() => { if (Math.random() < 0.5) Snd.snort(); }, 1700);
         st.cleanup = () => clearInterval(snIv);
+      } else if (k === 'drink') {
+        this._feedIdle(pet, st, 'drink');
       } else {
         const p = this.randFloor(20);
         st.until = 99;

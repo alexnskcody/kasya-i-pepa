@@ -242,6 +242,25 @@
       }
     },
 
+    lap() {
+      if (!this.ctx) return;
+      for (let i = 0; i < 3; i++) {
+        const t0 = this._t() + i * 0.15;
+        this._noise(t0, 0.05, 'bandpass', 2100, 1300, 0.055, 1.6);
+        this._osc('sine',
+          (fp, t) => { fp.setValueAtTime(760, t); fp.exponentialRampToValueAtTime(430, t + 0.05); },
+          t0 + 0.015, 0.05,
+          (gp, t) => { gp.setValueAtTime(0.0001, t); gp.linearRampToValueAtTime(0.035, t + 0.01); gp.exponentialRampToValueAtTime(0.0001, t + 0.05); });
+      }
+    },
+
+    nibble() {
+      if (!this.ctx) return;
+      for (let i = 0; i < 2; i++) {
+        this._noise(this._t() + i * 0.16, 0.05, 'bandpass', 1400, 800, 0.07, 1.6);
+      }
+    },
+
     pop() {
       if (!this.ctx) return;
       const t0 = this._t();

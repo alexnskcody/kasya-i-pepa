@@ -90,6 +90,27 @@
       autoRemove(w, 550);
     },
 
+    waterRipple(x, y) {
+      const { w, inner } = wrap(x, y, 'fx-ripple');
+      inner.appendChild(el('ellipse', {
+        rx: 16, ry: 5, fill: 'none', stroke: '#6db9dd', 'stroke-width': 3, opacity: 0.9,
+      }));
+      autoRemove(w, 550);
+    },
+
+    grassBits(x, y) {
+      for (let i = 0; i < 3; i++) {
+        const { w, inner } = wrap(x + (Math.random() - 0.5) * 20, y, 'fx-burst',
+          `--dx:${(Math.random() - 0.5) * 56}px; --dy:${-14 - Math.random() * 30}px`);
+        inner.appendChild(el('rect', {
+          x: -1.6, y: -7, width: 3.2, height: 14, rx: 1.6,
+          fill: i % 2 ? '#6dbb54' : '#8fdc7f',
+          transform: `rotate(${Math.random() * 80 - 40})`,
+        }));
+        autoRemove(w, 800);
+      }
+    },
+
     zzzStart(getPos) {
       const iv = setInterval(() => {
         const p = getPos();

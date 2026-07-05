@@ -96,6 +96,11 @@
         ${muzzle(o.happyMouth)}
         ${WHISKERS}
         ${BLUSH}
+        ${o.groomTongue ? `<g transform="translate(1 0)"><g class="a-tongue-lick">
+          <path d="M -5.5,-2 C -5.5,7 -2.5,13 0,13 C 2.5,13 5.5,7 5.5,-2 Z"
+            fill="#ef8ea0" stroke="#d06a80" stroke-width="1.6"/>
+          <path d="M 0,1 L 0,9" stroke="#d06a80" stroke-width="1.4" stroke-linecap="round"/>
+        </g></g>` : ''}
       </g>
     </g>`;
   }
@@ -242,24 +247,42 @@
         ${head({ x: -52, y: -12, tilt: -74 })}`;
     },
 
-    /* ── ВЫЛИЗЫВАЕТСЯ (как на фото, с язычком) ── */
+    /* ── ВЫЛИЗЫВАЕТСЯ (как на фото: лапка у мордочки, язычок наружу) ── */
     groom() {
-      const b = sitBase();
-      return `${b.tail}${b.haunch}
-        <g class="a-breathe">
-          <ellipse cx="8" cy="-78" rx="30" ry="40" fill="${BODY}" stroke="${OUT}" stroke-width="2.5"/>
-          <ellipse cx="10" cy="-62" rx="17" ry="25" fill="${BELLY}"/>
-          ${head({ x: 6, y: -98, tilt: 24, eyes: 'closed' })}
-        </g>
-        <g transform="translate(36 -60)"><g class="a-tongue-groom">
-          <ellipse cx="0" cy="0" rx="5" ry="8" fill="#e58a94" stroke="#c96a78" stroke-width="1.5"/>
+      return `
+        <g transform="translate(30 -14)"><g class="a-tail-sway">
+          <path d="M 0,0 C 20,4 34,-4 38,-22 C 40,-34 34,-44 24,-48" fill="none"
+            stroke="${TAIL}" stroke-width="15" stroke-linecap="round"/>
+          <path d="M 35,-28 C 35,-38 31,-45 24,-48" fill="none"
+            stroke="${TAIL_TIP}" stroke-width="15" stroke-linecap="round"/>
         </g></g>
-        <g><rect x="-4" y="-56" width="11" height="54" rx="5.5" fill="${LEG}" stroke="${OUT}" stroke-width="2"/>
-        <ellipse cx="1.5" cy="-3" rx="9" ry="6" fill="${PAW}"/></g>
-        <g transform="translate(30 -46)"><g class="a-paw-groom">
-          <path d="M -5.5,0 L -5.5,-32 Q -5.5,-40 0,-40 Q 5.5,-40 5.5,-32 L 5.5,0 Z"
-            fill="${LEG}" stroke="${OUT}" stroke-width="2"/>
-          <circle cx="0" cy="-40" r="8.5" fill="${PAW}"/>
+        <ellipse cx="-4" cy="-38" rx="48" ry="40" fill="${BODY}" stroke="${OUT}" stroke-width="2.5"/>
+        <ellipse cx="18" cy="-5" rx="17" ry="8" fill="#3a2013"/>
+        <g class="a-breathe">
+          <g transform="rotate(6)">
+            <ellipse cx="9" cy="-72" rx="28" ry="37" fill="${BODY}" stroke="${OUT}" stroke-width="2.5"/>
+            <ellipse cx="11" cy="-57" rx="16" ry="22" fill="${BELLY}"/>
+          </g>
+          <g transform="translate(2 -92)"><g class="a-groom-head">
+            ${head({ tilt: 22, eyes: 'closed', groomTongue: true })}
+          </g></g>
+        </g>
+        <g transform="rotate(-4)">
+          <rect x="-12" y="-52" width="11" height="51" rx="5.5" fill="${LEG}"
+            stroke="${OUT}" stroke-width="2"/>
+          <ellipse cx="-6" cy="-3" rx="9" ry="6" fill="${PAW}"/>
+        </g>
+        <g transform="translate(22 -48)"><g class="a-paw-groom">
+          <path d="M 0,0 C -1,-11 -4,-21 -8,-31" fill="none" stroke="${LEG}"
+            stroke-width="13" stroke-linecap="round"/>
+          <path d="M 1,-2 C 0,-12 -2,-20 -6,-29" fill="none" stroke="#6d4630"
+            stroke-width="7" stroke-linecap="round" opacity="0.7"/>
+          <circle cx="-9" cy="-34" r="9.5" fill="${PAW}" stroke="#c98b78" stroke-width="2.2"/>
+          <g fill="#e8a08a">
+            <ellipse cx="-9" cy="-36" rx="3.6" ry="3" />
+            <circle cx="-13.5" cy="-31.5" r="1.8"/>
+            <circle cx="-4.5" cy="-31.5" r="1.8"/>
+          </g>
         </g></g>`;
     },
 
