@@ -33,6 +33,8 @@
           navigator.audioSession.type = 'playback';
         }
       } catch (e) { /* нет API — ниже фолбэк */ }
+      // пул фолбэка разблокируется строго внутри жеста
+      if (this.fallback && this._fbUnlock) this._fbUnlock();
       if (!this._unlockEl) {
         const a = document.createElement('audio');
         a.setAttribute('playsinline', '');
@@ -62,10 +64,212 @@
       }
     },
 
+    /* ═══ Фолбэк без Web Audio (например, iOS Lockdown Mode):
+       звуки рендерятся математикой в WAV и играются пулом <audio>. ═══ */
+    _installFallback() {
+      this.fallback = true;
+      const RATE = 22050;
+
+      // кусочно-линейная огибающая [[t,v],...]
+      const seg = (pts, t) => {
+        if (t <= pts[0][0]) return pts[0][1];
+        for (let i = 1; i < pts.length; i++) {
+          if (t <= pts[i][0]) {
+            const a = pts[i - 1], b = pts[i];
+            return a[1] + (b[1] - a[1]) * ((t - a[0]) / Math.max(1e-6, b[0] - a[0]));
+          }
+        }
+        return pts[pts.length - 1][1];
+      };
+      const buf = (dur) => new Float32Array(Math.max(1, Math.round(dur * RATE)));
+
+      const tone = (out, o) => {
+        let ph = 0;
+        const off = Math.round((o.at || 0) * RATE);
+        for (let i = 0; i + off < out.length; i++) {
+          const t = i / RATE;
+          const fr = seg(o.f, t) * (1 + (o.vib || 0) * Math.sin(2 * Math.PI * (o.vibHz || 6) * t));
+          ph += fr / RATE;
+          const p = ph - Math.floor(ph);
+          const w = o.wave === 'saw' ? 2 * p - 1
+            : o.wave === 'square' ? (p < 0.5 ? 1 : -1)
+            : o.wave === 'triangle' ? (p < 0.5 ? 4 * p - 1 : 3 - 4 * p)
+            : Math.sin(2 * Math.PI * ph);
+          out[i + off] += w * seg(o.a, t);
+        }
+      };
+
+      // шум через грубый резонансный полосовой фильтр
+      const noise = (out, o) => {
+        let lp1 = 0, lp2 = 0;
+        const off = Math.round((o.at || 0) * RATE);
+        for (let i = 0; i + off < out.length; i++) {
+          const t = i / RATE;
+          const k = Math.min(0.95, (seg(o.f, t) / RATE) * 6.28);
+          const w = Math.random() * 2 - 1;
+          lp1 += k * (w - lp1);
+          lp2 += k * 0.35 * (lp1 - lp2);
+          out[i + off] += (lp1 - lp2) * 3 * seg(o.a, t);
+        }
+      };
+
+      const wavURL = (data) => {
+        const n = data.length;
+        const b = new ArrayBuffer(44 + n * 2);
+        const v = new DataView(b);
+        const wr = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+        wr(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); wr(8, 'WAVEfmt ');
+        v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+        v.setUint32(24, RATE, true); v.setUint32(28, RATE * 2, true);
+        v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+        wr(36, 'data'); v.setUint32(40, n * 2, true);
+        for (let i = 0; i < n; i++) {
+          const s = Math.max(-1, Math.min(1, data[i] * 0.85));
+          v.setInt16(44 + i * 2, s * 32767, true);
+        }
+        return URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+      };
+
+      /* рецепты (та же палитра, что в WebAudio-версии) */
+      const meow = (fs, dur, amp, wave) => () => {
+        const o = buf(dur);
+        const f = fs.map((x, i) => [dur * i / (fs.length - 1), x]);
+        tone(o, { wave: wave || 'saw', vib: 0.02, f, a: [[0, 0], [0.04, amp], [dur * 0.6, amp], [dur, 0]] });
+        tone(o, { wave: 'triangle', f: f.map(p => [p[0], p[1] * 2]), a: [[0, 0], [0.04, amp * 0.35], [dur, 0]] });
+        return o;
+      };
+      const R = {
+        meow: meow([520, 760, 700, 480], 0.5, 0.26),
+        mew: meow([640, 900, 820], 0.22, 0.2),
+        angry: meow([430, 380, 330, 240], 0.42, 0.27),
+        squeak: meow([880, 1240, 990], 0.16, 0.18),
+        whine: () => { const o = buf(0.9); tone(o, { f: [[0, 620], [0.4, 1050], [0.85, 560]], a: [[0, 0], [0.15, 0.11], [0.6, 0.11], [0.9, 0]], vib: 0.012 }); return o; },
+        snort: () => { const o = buf(0.16); noise(o, { f: [[0, 900], [0.16, 200]], a: [[0, 0], [0.01, 0.26], [0.16, 0]] }); return o; },
+        pant: () => { const o = buf(0.3); noise(o, { f: [[0, 1400], [0.12, 900]], a: [[0, 0], [0.01, 0.09], [0.12, 0]] }); noise(o, { at: 0.18, f: [[0, 1100], [0.12, 800]], a: [[0, 0], [0.01, 0.08], [0.12, 0]] }); return o; },
+        boing: () => { const o = buf(0.28); tone(o, { wave: 'triangle', f: [[0, 340], [0.24, 72]], a: [[0, 0], [0.01, 0.3], [0.26, 0]] }); tone(o, { f: [[0, 1300], [0.1, 340]], a: [[0, 0], [0.008, 0.14], [0.12, 0]] }); return o; },
+        step: () => { const o = buf(0.05); noise(o, { f: [[0, 1600], [0.05, 1800]], a: [[0, 0], [0.005, 0.05], [0.045, 0]] }); return o; },
+        crunch: () => { const o = buf(0.45); for (let i = 0; i < 3; i++) noise(o, { at: i * 0.13, f: [[0, 950], [0.06, 500]], a: [[0, 0], [0.008, 0.18], [0.06, 0]] }); return o; },
+        lap: () => { const o = buf(0.5); for (let i = 0; i < 3; i++) { noise(o, { at: i * 0.15, f: [[0, 2100], [0.05, 1300]], a: [[0, 0], [0.008, 0.07], [0.05, 0]] }); tone(o, { at: i * 0.15 + 0.015, f: [[0, 760], [0.05, 430]], a: [[0, 0], [0.008, 0.045], [0.05, 0]] }); } return o; },
+        nibble: () => { const o = buf(0.28); for (let i = 0; i < 2; i++) noise(o, { at: i * 0.16, f: [[0, 1400], [0.05, 800]], a: [[0, 0], [0.008, 0.09], [0.05, 0]] }); return o; },
+        pop: () => { const o = buf(0.1); tone(o, { f: [[0, 520], [0.08, 90]], a: [[0, 0], [0.006, 0.24], [0.09, 0]] }); return o; },
+        whoosh: () => { const o = buf(0.3); noise(o, { f: [[0, 350], [0.3, 2600]], a: [[0, 0], [0.05, 0.16], [0.3, 0]] }); return o; },
+        snore: () => { const o = buf(1.6); tone(o, { f: [[0, 64], [0.5, 88], [1, 60]], a: [[0, 0], [0.4, 0.12], [1, 0]] }); noise(o, { at: 1.15, f: [[0, 600], [0.4, 250]], a: [[0, 0], [0.05, 0.05], [0.4, 0]] }); return o; },
+        tweet: () => { const o = buf(0.34); [0, 0.14, 0.24].forEach((dt, i) => tone(o, { at: dt, f: [[0, 2300 + i * 300], [0.06, 3100 + i * 200]], a: [[0, 0], [0.01, 0.04], [0.07, 0]] })); return o; },
+        rattle: () => { const o = buf(0.45); for (let i = 0; i < 5; i++) noise(o, { at: i * 0.07, f: [[0, 500 + Math.random() * 1500], [0.05, 400]], a: [[0, 0], [0.006, 0.12], [0.05, 0]] }); return o; },
+        purr: () => {
+          const o = buf(1.6);
+          noise(o, { f: [[0, 420], [1.6, 420]], a: [[0, 0], [0.05, 0.16], [1.55, 0.16], [1.6, 0]] });
+          for (let i = 0; i < o.length; i++) {
+            const t = i / RATE;
+            o[i] *= 0.55 + 0.45 * Math.sin(2 * Math.PI * 23 * t);
+          }
+          return o;
+        },
+      };
+      const chimeR = (notes) => () => {
+        const o = buf(0.6 + notes.length * 0.07);
+        notes.forEach((fq, i) => {
+          tone(o, { at: i * 0.07, f: [[0, fq]], a: [[0, 0], [0.01, 0.13], [0.5, 0]] });
+          tone(o, { at: i * 0.07, f: [[0, fq * 2.01]], a: [[0, 0], [0.01, 0.045], [0.25, 0]] });
+        });
+        return o;
+      };
+      const barkR = (n, hi) => () => {
+        const p = hi ? 1.22 : 1;
+        const o = buf(0.14 + (n - 1) * 0.17);
+        for (let i = 0; i < n; i++) {
+          noise(o, { at: i * 0.17, f: [[0, 800 * p], [0.09, 350 * p]], a: [[0, 0], [0.008, 0.34], [0.09, 0]] });
+          tone(o, { wave: 'square', at: i * 0.17, f: [[0, 175 * p], [0.1, 88 * p]], a: [[0, 0], [0.012, 0.24], [0.1, 0]] });
+        }
+        return o;
+      };
+
+      /* пул разблокированных элементов */
+      this._pool = [];
+      this._fbCache = {};
+      const silent = this._silentURI();
+      this._fbUnlock = () => {
+        if (this._pool.length) return;
+        for (let i = 0; i < 6; i++) {
+          const a = document.createElement('audio');
+          a.setAttribute('playsinline', '');
+          a.setAttribute('webkit-playsinline', '');
+          a.src = silent;
+          const p = a.play(); // внутри жеста — элемент разблокируется
+          if (p && p.then) p.then(() => { a.pause(); }).catch(() => {});
+          this._pool.push(a);
+        }
+        if (!this._hello) {
+          this._hello = true;
+          setTimeout(() => this.chime([1046, 1568]), 250);
+        }
+      };
+      const play = (name, make, loop) => {
+        if (this.muted || !this._pool.length) return null;
+        let url = this._fbCache[name];
+        if (!url) url = this._fbCache[name] = wavURL(make());
+        const a = this._pool.find((x) => x.paused);
+        if (!a) return null;
+        try {
+          a.loop = !!loop;
+          a.src = url;
+          const p = a.play();
+          if (p && p.catch) p.catch(() => {});
+        } catch (e) { return null; }
+        return a;
+      };
+
+      /* подмена публичных методов */
+      this.meow = (kind) => { play('meow_' + (kind || 'meow'), R[kind || 'meow'] || R.meow); };
+      this.bark = (n, pitch) => {
+        n = n || 1;
+        const hi = (pitch || 1) > 1.12;
+        play('bark' + n + (hi ? 'h' : 'l'), barkR(n, hi));
+      };
+      this.whine = () => play('whine', R.whine);
+      this.snort = () => play('snort', R.snort);
+      this.pant = () => play('pant', R.pant);
+      this.boing = () => play('boing', R.boing);
+      this.step = () => play('step', R.step);
+      this.crunch = () => play('crunch', R.crunch);
+      this.lap = () => play('lap', R.lap);
+      this.nibble = () => play('nibble', R.nibble);
+      this.pop = () => play('pop', R.pop);
+      this.whoosh = () => play('whoosh', R.whoosh);
+      this.snore = () => play('snore', R.snore);
+      this.tweet = () => play('tweet', R.tweet);
+      this.rattle = () => play('rattle', R.rattle);
+      this.chime = (notes) => { const ns = notes || [1046, 1318, 1568]; play('chime_' + ns.join('_'), chimeR(ns)); };
+      this.fanfare = () => {
+        const seqR = () => {
+          const o = buf(1.2);
+          [523, 659, 784, 1046, 784, 1046].forEach((fq, i) =>
+            tone(o, { wave: 'triangle', at: i * 0.11, f: [[0, fq]], a: [[0, 0], [0.015, 0.18], [0.22, 0]] }));
+          noise(o, { at: 0.5, f: [[0, 3000], [0.5, 6000]], a: [[0, 0], [0.05, 0.05], [0.5, 0]] });
+          [1568, 2093, 2637].forEach((fq, i) =>
+            tone(o, { at: 0.55 + i * 0.07, f: [[0, fq]], a: [[0, 0], [0.01, 0.12], [0.5, 0]] }));
+          return o;
+        };
+        play('fanfare', seqR);
+      };
+      this.purrStart = () => {
+        if (this._purrEl) return;
+        this._purrEl = play('purr', R.purr, true);
+      };
+      this.purrStop = () => {
+        if (this._purrEl) { try { this._purrEl.pause(); } catch (e) {} this._purrEl = null; }
+      };
+      this.resume = () => {};
+    },
+
     init() {
-      if (this.ctx) return;
+      if (this.ctx || this.fallback) return;
       const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return;
+      if (!AC) {
+        // Lockdown Mode / нет Web Audio: рендерим звуки в WAV сами
+        this._installFallback();
+        return;
+      }
       this.ctx = new AC();
       this.master = this.ctx.createGain();
       this.master.gain.value = this.muted ? 0 : 0.85;
@@ -107,6 +311,9 @@
         kick: !!this._kicked,
         session: (navigator.audioSession && navigator.audioSession.type) || 'нет API',
         muted: this.muted,
+        AC: ('AudioContext' in window) || ('webkitAudioContext' in window),
+        fb: this.fallback ? ('pool:' + (this._pool ? this._pool.length : 0) +
+          ' кэш:' + Object.keys(this._fbCache || {}).length) : 'выкл',
       };
     },
 
@@ -114,6 +321,7 @@
       this.muted = m;
       localStorage.setItem('mp_muted', m ? '1' : '0');
       if (this.master) this.master.gain.value = m ? 0 : 0.85;
+      if (m && this.fallback) this.purrStop();
     },
 
     _t() { return this.ctx.currentTime; },

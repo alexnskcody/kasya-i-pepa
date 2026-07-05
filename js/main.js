@@ -179,7 +179,8 @@
       d.textContent =
         'ctx:' + s.ctx + '  t:' + s.time + '  rate:' + s.rate +
         '\nloop:' + s.loop + '  kick:' + s.kick + '  muted:' + s.muted +
-        '\nsession:' + s.session;
+        '\nsession:' + s.session +
+        '\nAC:' + (s.AC ? 'есть' : 'НЕТ (Lockdown?)') + '  fb:' + s.fb;
     }, 500);
   }
 

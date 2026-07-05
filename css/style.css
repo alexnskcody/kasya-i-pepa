@@ -314,27 +314,6 @@ html, body {
   100% { transform: scale(1.7); opacity: 0; }
 }
 
-/* ═══════════ ЛИНИИ СКОРОСТИ ═══════════ */
-
-#speedlines {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 5;
-  background:
-    repeating-linear-gradient(90deg,
-      transparent 0 70px,
-      rgba(255, 255, 255, 0.28) 70px 76px,
-      transparent 76px 150px);
-  -webkit-mask-image: radial-gradient(ellipse at center, transparent 30%, black 85%);
-  mask-image: radial-gradient(ellipse at center, transparent 30%, black 85%);
-  animation: speedSlide 0.3s linear infinite;
-}
-@keyframes speedSlide {
-  from { background-position-x: 0; }
-  to { background-position-x: -150px; }
-}
-
 /* ═══════════ ИНТЕРФЕЙС ═══════════ */
 
 #ui {

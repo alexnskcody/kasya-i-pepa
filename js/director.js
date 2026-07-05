@@ -84,15 +84,22 @@
       return { x: clamp(p.x, f.x0, f.x1), y: clamp(p.y, f.y0, f.y1) };
     },
 
-    /* после поворота экрана возвращаем всех в видимую зону */
+    /* после поворота экрана возвращаем всех в видимую зону;
+       мягко: небольшой выход за край — питомец сам доходит шагом
+       (тулбар Safari постоянно меняет высоту окна — телепорты дёргали) */
     refit() {
       const f = this.floorRect();
       [this.cat, this.dog].forEach((p) => {
         if (p.busy || p.zone !== 'floor' || this._lerps.some((L) => L.pet === p)) return;
         if (p.y > 640 && (p.x < f.x0 || p.x > f.x1 || p.y < f.y0 || p.y > f.y1)) {
           const c = this.clampFloor({ x: p.x, y: p.y });
-          p.x = c.x; p.y = c.y;
-          p.applyTransform();
+          const d = Math.hypot(c.x - p.x, c.y - p.y);
+          if (d > 140) {
+            p.x = c.x; p.y = c.y;
+            p.applyTransform();
+          } else if (d > 4 && !p.target) {
+            p.moveTo(c.x, c.y, {});
+          }
         }
       });
       if (this.ball && !this.ball.carrier) {
@@ -559,7 +566,7 @@
       c.phase = 'chase'; c.t = 0;
       c.playerCat = this.mode === 'cat';
       c.playerDog = this.mode === 'dog';
-      document.getElementById('speedlines').classList.remove('hidden');
+      
       this.cat.setEarsBack(true);
       this.dog.setTailWag(false);
       if (c.playerDog) {
@@ -673,7 +680,7 @@
       c.cloudPos = mid;
       c.onSofa = onSofa;
       this.cat.setHidden(true); this.dog.setHidden(true);
-      document.getElementById('speedlines').classList.add('hidden');
+      
       c.cloud = FX.tussleCloud(mid.x, mid.y - 40);
       Snd.rattle();
       c.rattleIv = setInterval(() => {
@@ -696,7 +703,7 @@
       const c = this.chase; if (!c) return;
       if (c.rattleIv) clearInterval(c.rattleIv);
       if (c.cloud) { c.cloud.end(); c.cloud = null; }
-      document.getElementById('speedlines').classList.add('hidden');
+      
       const wasPlayerCat = !!c.playerCat;
       const from = c.cloudPos || { x: this.cat.x, y: this.cat.y };
       this.cat.setHidden(false); this.dog.setHidden(false);
@@ -792,7 +799,7 @@
       if (c) {
         if (c.rattleIv) clearInterval(c.rattleIv);
         if (c.cloud) c.cloud.end();
-        document.getElementById('speedlines').classList.add('hidden');
+        
         this.cat.setHidden(false); this.dog.setHidden(false);
       }
       this.chase = null;
