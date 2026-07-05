@@ -157,9 +157,12 @@
     session = null;
   }
 
-  // любой первый тап (включая кнопки) будит звук; тихий <audio> снимает
-  // блокировку беззвучного переключателя iOS
-  addEventListener('pointerdown', () => { Snd.init(); Snd.unlock(); Snd.resume(); }, { capture: true });
+  // Любой тап будит звук. iOS даёт «активацию пользователя» только на
+  // pointerup/touchend/click (НЕ на pointerdown от пальца!) — поэтому
+  // слушаем всё; тихий <audio> снимает блокировку беззвучного переключателя.
+  const wakeAudio = () => { Snd.init(); Snd.unlock(); Snd.resume(); };
+  ['pointerdown', 'pointerup', 'touchend', 'click'].forEach((ev) =>
+    addEventListener(ev, wakeAudio, { capture: true, passive: true }));
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) Snd.resume();
   });

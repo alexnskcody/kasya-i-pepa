@@ -35,8 +35,22 @@
         a.src = this._silentURI();
         this._unlockEl = a;
       }
-      const p = this._unlockEl.play();
-      if (p && p.catch) p.catch(() => {});
+      // важно: сработает только внутри события с активацией (touchend/click)
+      if (this._unlockEl.paused) {
+        const p = this._unlockEl.play();
+        if (p && p.catch) p.catch(() => {});
+      }
+      // классический «пинок» WebAudio пустым буфером внутри жеста
+      if (this.ctx && !this._kicked) {
+        try {
+          const b = this.ctx.createBuffer(1, 1, 22050);
+          const s = this.ctx.createBufferSource();
+          s.buffer = b;
+          s.connect(this.ctx.destination);
+          s.start(0);
+          this._kicked = true;
+        } catch (e) { /* не критично */ }
+      }
     },
 
     init() {
