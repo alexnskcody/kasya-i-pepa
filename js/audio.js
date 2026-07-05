@@ -26,6 +26,15 @@
       return 'data:audio/wav;base64,' + btoa(bin);
     },
 
+    isIOS() {
+      if (this._ios == null) {
+        const ua = navigator.userAgent || '';
+        this._ios = /iPhone|iPad|iPod/.test(ua) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      }
+      return this._ios;
+    },
+
     /* .m4a (AAC) — если браузер умеет (Lockdown разрешает только его),
        иначе .wav */
     ext() {
@@ -47,22 +56,27 @@
       } catch (e) { /* нет API — ниже фолбэк */ }
       // пул фолбэка разблокируется строго внутри жеста
       if (this.fallback && this._fbUnlock) this._fbUnlock();
-      if (!this._unlockEl) {
-        const a = document.createElement('audio');
-        a.setAttribute('playsinline', '');
-        a.setAttribute('webkit-playsinline', '');
-        a.loop = true;
-        a.preload = 'auto';
-        // обычный HTTP-файл: data:-URI в Lockdown Mode зависает в загрузке
-        a.src = 'audio/_silent' + this.ext();
-        a.style.display = 'none';
-        if (document.body) document.body.appendChild(a);
-        this._unlockEl = a;
-      }
-      // важно: сработает только внутри события с активацией (touchend/click)
-      if (this._unlockEl.paused) {
-        const p = this._unlockEl.play();
-        if (p && p.catch) p.catch(() => {});
+      // Тихий луп нужен ТОЛЬКО iOS (обход беззвучного переключателя).
+      // На Android/десктопе играющий медиаэлемент может перехватывать
+      // аудиофокус (приглушать музыку из других приложений) — не создаём.
+      if (this.isIOS()) {
+        if (!this._unlockEl) {
+          const a = document.createElement('audio');
+          a.setAttribute('playsinline', '');
+          a.setAttribute('webkit-playsinline', '');
+          a.loop = true;
+          a.preload = 'auto';
+          // обычный HTTP-файл: data:-URI в Lockdown Mode зависает в загрузке
+          a.src = 'audio/_silent' + this.ext();
+          a.style.display = 'none';
+          if (document.body) document.body.appendChild(a);
+          this._unlockEl = a;
+        }
+        // важно: сработает только внутри события с активацией (touchend/click)
+        if (this._unlockEl.paused) {
+          const p = this._unlockEl.play();
+          if (p && p.catch) p.catch(() => {});
+        }
       }
       // классический «пинок» WebAudio пустым буфером внутри жеста
       if (this.ctx && !this._kicked) {
