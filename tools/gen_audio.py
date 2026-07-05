@@ -200,14 +200,30 @@ def write_wav(path, data):
 def main():
     random.seed(7)  # воспроизводимость
     os.makedirs(OUT, exist_ok=True)
+    names = []
     total = 0
     for name, data in gen().items():
         p = os.path.join(OUT, name + '.wav')
         write_wav(p, data)
-        sz = os.path.getsize(p)
-        total += sz
-        print(f'{name}.wav  {sz // 1024}KB')
-    print(f'итого: {total // 1024}KB')
+        names.append(name)
+        total += os.path.getsize(p)
+    print(f'wav: {len(names)} файлов, {total // 1024}KB')
+
+    # iOS Lockdown Mode не декодирует WAV/PCM — нужен AAC (.m4a).
+    # afconvert есть на любом macOS.
+    import shutil
+    import subprocess
+    if shutil.which('afconvert'):
+        total_m4a = 0
+        for name in names:
+            src = os.path.join(OUT, name + '.wav')
+            dst = os.path.join(OUT, name + '.m4a')
+            subprocess.run(['afconvert', '-f', 'm4af', '-d', 'aac', src, dst],
+                           check=True, capture_output=True)
+            total_m4a += os.path.getsize(dst)
+        print(f'm4a: {len(names)} файлов, {total_m4a // 1024}KB')
+    else:
+        print('afconvert не найден — .m4a не сгенерированы')
 
 
 if __name__ == '__main__':

@@ -26,6 +26,18 @@
       return 'data:audio/wav;base64,' + btoa(bin);
     },
 
+    /* .m4a (AAC) — если браузер умеет (Lockdown разрешает только его),
+       иначе .wav */
+    ext() {
+      if (!this._ext) {
+        try {
+          const a = document.createElement('audio');
+          this._ext = (a.canPlayType && a.canPlayType('audio/mp4')) ? '.m4a' : '.wav';
+        } catch (e) { this._ext = '.wav'; }
+      }
+      return this._ext;
+    },
+
     unlock() {
       // iOS 17+: официальный способ не глохнуть от беззвучного переключателя
       try {
@@ -42,7 +54,7 @@
         a.loop = true;
         a.preload = 'auto';
         // обычный HTTP-файл: data:-URI в Lockdown Mode зависает в загрузке
-        a.src = 'audio/_silent.wav';
+        a.src = 'audio/_silent' + this.ext();
         a.style.display = 'none';
         if (document.body) document.body.appendChild(a);
         this._unlockEl = a;
@@ -72,14 +84,14 @@
 
       /* ── Lockdown-совместимое воспроизведение ──
          Факты с устройства: Web Audio вырезан, blob-медиа заблокированы,
-         data:-URI зависают в загрузке навсегда (play() не завершается).
-         Работает только базовый путь: обычные HTTP-файлы. Звуки заранее
-         сгенерированы в audio/*.wav (tools/gen_audio.py). */
+         data:-URI зависают, а WAV/PCM не входит в разрешённый Lockdown
+         набор кодеков (play → NotSupportedError). Работает AAC (.m4a)
+         обычным HTTP-файлом. Файлы сгенерированы tools/gen_audio.py. */
       const FILES = ['meow', 'mew', 'angry', 'squeak', 'whine', 'snort', 'pant',
         'boing', 'step', 'crunch', 'lap', 'nibble', 'pop', 'whoosh', 'snore',
         'tweet', 'rattle', 'purr', 'bark1l', 'bark1h', 'bark2l', 'bark2h',
         'chime_std', 'chime_hello', 'chime_mode', 'chime_win', 'fanfare'];
-      const soundURL = (n) => (FILES.indexOf(n) >= 0 ? 'audio/' + n + '.wav' : null);
+      const soundURL = (n) => (FILES.indexOf(n) >= 0 ? 'audio/' + n + this.ext() : null);
 
       const mkEl = (src) => {
         const a = document.createElement('audio');
@@ -97,7 +109,7 @@
       const ensurePool = () => { // вызывается в жесте
         if (this._pool.length) return;
         for (let i = 0; i < 6; i++) {
-          const a = mkEl('audio/_silent.wav');
+          const a = mkEl('audio/_silent' + this.ext());
           const p = a.play(); // разблокировка элемента
           if (p && p.then) p.then(() => { if (!a._busy) a.pause(); }).catch(() => {});
           // страховка от зависшего play(): не держим элемент занятым
@@ -210,7 +222,7 @@
         this._purrEl = el;
         el._busy = true;
         try {
-          el.src = 'audio/purr.wav';
+          el.src = 'audio/purr' + this.ext();
           el.loop = true;
           const p = el.play();
           if (p && p.catch) p.catch(() => {
@@ -283,7 +295,7 @@
         AC: ('AudioContext' in window) || ('webkitAudioContext' in window),
         fb: this.fallback
           ? ('pool:' + (this._pool ? this._pool.length : 0) +
-            ' файлы:http' +
+            ' файлы:' + this.ext() +
             ' очередь:' + (this._fbQueue ? this._fbQueue.length : 0) +
             (this._needGesture ? ' ЖЕСТ-РЕЖИМ' : '') +
             (this._fbOk ? ' ok' : '') +
