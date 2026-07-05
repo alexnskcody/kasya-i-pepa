@@ -68,7 +68,7 @@
        звуки рендерятся математикой в WAV и играются пулом <audio>. ═══ */
     _installFallback() {
       this.fallback = true;
-      const RATE = 22050;
+      const RATE = 16000;
 
       // кусочно-линейная огибающая [[t,v],...]
       const seg = (pts, t) => {
@@ -111,23 +111,6 @@
           lp2 += k * 0.35 * (lp1 - lp2);
           out[i + off] += (lp1 - lp2) * 3 * seg(o.a, t);
         }
-      };
-
-      const wavURL = (data) => {
-        const n = data.length;
-        const b = new ArrayBuffer(44 + n * 2);
-        const v = new DataView(b);
-        const wr = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
-        wr(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); wr(8, 'WAVEfmt ');
-        v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-        v.setUint32(24, RATE, true); v.setUint32(28, RATE * 2, true);
-        v.setUint16(32, 2, true); v.setUint16(34, 16, true);
-        wr(36, 'data'); v.setUint32(40, n * 2, true);
-        for (let i = 0; i < n; i++) {
-          const s = Math.max(-1, Math.min(1, data[i] * 0.85));
-          v.setInt16(44 + i * 2, s * 32767, true);
-        }
-        return URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
       };
 
       /* рецепты (та же палитра, что в WebAudio-версии) */
@@ -184,79 +167,157 @@
         return o;
       };
 
-      /* пул разблокированных элементов */
+      /* ── аудио-спрайт: ВСЕ звуки в одном файле, src никогда не меняется.
+         iOS сбрасывает разблокировку <audio> при смене src — поэтому
+         элементы разблокируются сразу со спрайтом и потом только
+         перематываются. data:-URI выбран потому, что тихий data:-луп
+         доказанно играет даже в Lockdown Mode. ── */
+      const fanfareR = () => {
+        const o = buf(1.2);
+        [523, 659, 784, 1046, 784, 1046].forEach((fq, i) =>
+          tone(o, { wave: 'triangle', at: i * 0.11, f: [[0, fq]], a: [[0, 0], [0.015, 0.18], [0.22, 0]] }));
+        noise(o, { at: 0.5, f: [[0, 3000], [0.5, 6000]], a: [[0, 0], [0.05, 0.05], [0.5, 0]] });
+        [1568, 2093, 2637].forEach((fq, i) =>
+          tone(o, { at: 0.55 + i * 0.07, f: [[0, fq]], a: [[0, 0], [0.01, 0.12], [0.5, 0]] }));
+        return o;
+      };
+      const DEFS = [
+        ['meow', R.meow], ['mew', R.mew], ['angry', R.angry], ['squeak', R.squeak],
+        ['whine', R.whine], ['snort', R.snort], ['pant', R.pant], ['boing', R.boing],
+        ['step', R.step], ['crunch', R.crunch], ['lap', R.lap], ['nibble', R.nibble],
+        ['pop', R.pop], ['whoosh', R.whoosh], ['snore', R.snore], ['tweet', R.tweet],
+        ['rattle', R.rattle], ['purr', R.purr],
+        ['bark1l', barkR(1, false)], ['bark1h', barkR(1, true)],
+        ['bark2l', barkR(2, false)], ['bark2h', barkR(2, true)],
+        ['chime_std', chimeR([1046, 1318, 1568])],
+        ['chime_hello', chimeR([1046, 1568])],
+        ['chime_mode', chimeR([784, 988])],
+        ['chime_win', chimeR([1568, 2093, 2637])],
+        ['fanfare', fanfareR],
+      ];
+      const GAP = 0.3;
+      this._offsets = null;
+      this._spriteURI = null;
+      const buildSprite = () => {
+        if (this._spriteURI) return;
+        const parts = DEFS.map((d) => [d[0], d[1]()]);
+        let total = Math.round(0.1 * RATE);
+        parts.forEach((p) => { total += p[1].length + Math.round(GAP * RATE); });
+        const all = new Float32Array(total);
+        const offs = {};
+        let pos = Math.round(0.05 * RATE);
+        parts.forEach((p) => {
+          all.set(p[1], pos);
+          offs[p[0]] = [pos / RATE, p[1].length / RATE];
+          pos += p[1].length + Math.round(GAP * RATE);
+        });
+        const n = all.length;
+        const b = new ArrayBuffer(44 + n * 2);
+        const v = new DataView(b);
+        const wr = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+        wr(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); wr(8, 'WAVEfmt ');
+        v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+        v.setUint32(24, RATE, true); v.setUint32(28, RATE * 2, true);
+        v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+        wr(36, 'data'); v.setUint32(40, n * 2, true);
+        for (let i = 0; i < n; i++) {
+          const s = Math.max(-1, Math.min(1, all[i] * 0.85));
+          v.setInt16(44 + i * 2, s * 32767, true);
+        }
+        const u8 = new Uint8Array(b);
+        let bin = '';
+        for (let i = 0; i < u8.length; i += 0x8000) {
+          bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+        }
+        this._spriteURI = 'data:audio/wav;base64,' + btoa(bin);
+        this._offsets = offs;
+      };
+
       this._pool = [];
-      this._fbCache = {};
-      const silent = this._silentURI();
       this._fbUnlock = () => {
         if (this._pool.length) return;
-        for (let i = 0; i < 6; i++) {
+        try { buildSprite(); } catch (e) { this._fbErr = 'build:' + e.message; return; }
+        for (let i = 0; i < 5; i++) {
           const a = document.createElement('audio');
           a.setAttribute('playsinline', '');
           a.setAttribute('webkit-playsinline', '');
-          a.src = silent;
-          const p = a.play(); // внутри жеста — элемент разблокируется
-          if (p && p.then) p.then(() => { a.pause(); }).catch(() => {});
+          a.preload = 'auto';
+          a.src = this._spriteURI;
+          const p = a.play(); // в жесте: элемент разблокируется сразу со спрайтом
+          if (p && p.then) {
+            p.then(() => { if (!a._ready) { a._ready = true; a.pause(); } })
+              .catch((e) => { this._fbErr = 'unlock:' + (e && e.name); });
+          }
           this._pool.push(a);
         }
         if (!this._hello) {
           this._hello = true;
-          setTimeout(() => this.chime([1046, 1568]), 250);
+          setTimeout(() => this.chime([1046, 1568]), 400);
         }
       };
-      const play = (name, make, loop) => {
-        if (this.muted || !this._pool.length) return null;
-        let url = this._fbCache[name];
-        if (!url) url = this._fbCache[name] = wavURL(make());
-        const a = this._pool.find((x) => x.paused);
+
+      const play = (name) => {
+        if (this.muted || !this._pool.length || !this._offsets) return null;
+        const seg = this._offsets[name];
+        if (!seg) return null;
+        const a = this._pool.find((x) => x.paused && x !== this._purrEl);
         if (!a) return null;
         try {
-          a.loop = !!loop;
-          a.src = url;
+          clearTimeout(a._stopT);
+          a.currentTime = seg[0];
           const p = a.play();
-          if (p && p.catch) p.catch(() => {});
-        } catch (e) { return null; }
+          if (p && p.catch) p.catch((e) => { this._fbErr = 'play:' + (e && e.name); });
+          a._stopT = setTimeout(() => { try { a.pause(); } catch (e2) {} }, seg[1] * 1000 + 80);
+        } catch (e) {
+          this._fbErr = 'seek:' + e.message;
+          return null;
+        }
         return a;
       };
 
       /* подмена публичных методов */
-      this.meow = (kind) => { play('meow_' + (kind || 'meow'), R[kind || 'meow'] || R.meow); };
-      this.bark = (n, pitch) => {
-        n = n || 1;
-        const hi = (pitch || 1) > 1.12;
-        play('bark' + n + (hi ? 'h' : 'l'), barkR(n, hi));
+      this.meow = (kind) => { play(kind && ['mew', 'angry', 'squeak'].indexOf(kind) >= 0 ? kind : 'meow'); };
+      this.bark = (n, pitch) => { play('bark' + (n === 2 ? 2 : 1) + ((pitch || 1) > 1.12 ? 'h' : 'l')); };
+      this.whine = () => play('whine');
+      this.snort = () => play('snort');
+      this.pant = () => play('pant');
+      this.boing = () => play('boing');
+      this.step = () => play('step');
+      this.crunch = () => play('crunch');
+      this.lap = () => play('lap');
+      this.nibble = () => play('nibble');
+      this.pop = () => play('pop');
+      this.whoosh = () => play('whoosh');
+      this.snore = () => play('snore');
+      this.tweet = () => play('tweet');
+      this.rattle = () => play('rattle');
+      this.chime = (notes) => {
+        const f = (notes && notes[0]) || 1046;
+        play(f < 900 ? 'chime_mode' : f > 1400 ? 'chime_win'
+          : (notes && notes.length === 2 ? 'chime_hello' : 'chime_std'));
       };
-      this.whine = () => play('whine', R.whine);
-      this.snort = () => play('snort', R.snort);
-      this.pant = () => play('pant', R.pant);
-      this.boing = () => play('boing', R.boing);
-      this.step = () => play('step', R.step);
-      this.crunch = () => play('crunch', R.crunch);
-      this.lap = () => play('lap', R.lap);
-      this.nibble = () => play('nibble', R.nibble);
-      this.pop = () => play('pop', R.pop);
-      this.whoosh = () => play('whoosh', R.whoosh);
-      this.snore = () => play('snore', R.snore);
-      this.tweet = () => play('tweet', R.tweet);
-      this.rattle = () => play('rattle', R.rattle);
-      this.chime = (notes) => { const ns = notes || [1046, 1318, 1568]; play('chime_' + ns.join('_'), chimeR(ns)); };
-      this.fanfare = () => {
-        const seqR = () => {
-          const o = buf(1.2);
-          [523, 659, 784, 1046, 784, 1046].forEach((fq, i) =>
-            tone(o, { wave: 'triangle', at: i * 0.11, f: [[0, fq]], a: [[0, 0], [0.015, 0.18], [0.22, 0]] }));
-          noise(o, { at: 0.5, f: [[0, 3000], [0.5, 6000]], a: [[0, 0], [0.05, 0.05], [0.5, 0]] });
-          [1568, 2093, 2637].forEach((fq, i) =>
-            tone(o, { at: 0.55 + i * 0.07, f: [[0, fq]], a: [[0, 0], [0.01, 0.12], [0.5, 0]] }));
-          return o;
-        };
-        play('fanfare', seqR);
-      };
+      this.fanfare = () => play('fanfare');
       this.purrStart = () => {
-        if (this._purrEl) return;
-        this._purrEl = play('purr', R.purr, true);
+        if (this._purrOn || !this._offsets) return;
+        const seg = this._offsets.purr;
+        const a = this._pool.find((x) => x.paused);
+        if (!seg || !a) return;
+        this._purrOn = true;
+        this._purrEl = a;
+        const cycle = () => {
+          if (!this._purrOn) return;
+          try {
+            a.currentTime = seg[0];
+            const p = a.play();
+            if (p && p.catch) p.catch(() => {});
+          } catch (e) { /* пропустим цикл */ }
+        };
+        cycle();
+        this._purrIv = setInterval(cycle, (seg[1] - 0.12) * 1000);
       };
       this.purrStop = () => {
+        this._purrOn = false;
+        clearInterval(this._purrIv);
         if (this._purrEl) { try { this._purrEl.pause(); } catch (e) {} this._purrEl = null; }
       };
       this.resume = () => {};
@@ -312,8 +373,11 @@
         session: (navigator.audioSession && navigator.audioSession.type) || 'нет API',
         muted: this.muted,
         AC: ('AudioContext' in window) || ('webkitAudioContext' in window),
-        fb: this.fallback ? ('pool:' + (this._pool ? this._pool.length : 0) +
-          ' кэш:' + Object.keys(this._fbCache || {}).length) : 'выкл',
+        fb: this.fallback
+          ? ('pool:' + (this._pool ? this._pool.length : 0) +
+            ' спрайт:' + (this._spriteURI ? Math.round(this._spriteURI.length / 1024) + 'КБ' : 'нет') +
+            (this._fbErr ? ' ERR:' + this._fbErr : ''))
+          : 'выкл',
       };
     },
 

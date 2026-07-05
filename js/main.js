@@ -163,6 +163,15 @@
   const wakeAudio = () => { Snd.init(); Snd.unlock(); Snd.resume(); };
   ['pointerdown', 'pointerup', 'touchend', 'click'].forEach((ev) =>
     addEventListener(ev, wakeAudio, { capture: true, passive: true }));
+
+  // фиксируем любые ошибки — видно в ?debug=1
+  addEventListener('error', (e) => {
+    window.__err = (e.message || 'ошибка') + ' @' +
+      String(e.filename || '').split('/').pop() + ':' + e.lineno;
+  });
+  addEventListener('unhandledrejection', (e) => {
+    window.__err = 'promise: ' + (e.reason && (e.reason.message || e.reason));
+  });
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) Snd.resume();
   });
@@ -180,7 +189,8 @@
         'ctx:' + s.ctx + '  t:' + s.time + '  rate:' + s.rate +
         '\nloop:' + s.loop + '  kick:' + s.kick + '  muted:' + s.muted +
         '\nsession:' + s.session +
-        '\nAC:' + (s.AC ? 'есть' : 'НЕТ (Lockdown?)') + '  fb:' + s.fb;
+        '\nAC:' + (s.AC ? 'есть' : 'НЕТ (Lockdown?)') + '  fb:' + s.fb +
+        '\nerr:' + (window.__err || '—');
     }, 500);
   }
 
@@ -247,22 +257,26 @@
   function frame(t) {
     const dt = Math.min(0.05, (t - last) / 1000);
     last = t;
-    if (!isFinite(Director.vr.x0)) { updateVR(); Director.refit(); }
-    Director.tick(dt, lastPointer);
+    // цикл неубиваем: любая ошибка кадра логируется, но не останавливает игру
+    try {
+      if (!isFinite(Director.vr.x0)) { updateVR(); Director.refit(); }
+      Director.tick(dt, lastPointer);
 
-    // контекстная кнопка действия
-    const st = Director.actionState();
-    if (st.visible) {
-      btnAction.classList.remove('hidden');
-      btnAction.textContent = st.label;
-      btnAction.disabled = !st.enabled;
-      btnAction.classList.toggle('attention', !!st.attention);
-    } else {
-      btnAction.classList.add('hidden');
+      // контекстная кнопка действия
+      const st = Director.actionState();
+      if (st.visible) {
+        btnAction.classList.remove('hidden');
+        btnAction.textContent = st.label;
+        btnAction.disabled = !st.enabled;
+        btnAction.classList.toggle('attention', !!st.attention);
+      } else {
+        btnAction.classList.add('hidden');
+      }
+      btnBeg.classList.toggle('hidden', Director.mode !== 'dog');
+      btnTreat.disabled = !!Director.treat || Director.celebrating;
+    } catch (e) {
+      window.__err = 'frame: ' + e.message;
     }
-    btnBeg.classList.toggle('hidden', Director.mode !== 'dog');
-    btnTreat.disabled = !!Director.treat || Director.celebrating;
-
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
