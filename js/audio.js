@@ -11,7 +11,7 @@
        аудиосессия в категории ambient. Зацикленный беззвучный <audio>
        переводит её в playback — звук работает даже с выключенным звонком. */
     _silentURI() {
-      const rate = 8000, n = 480;
+      const rate = 8000, n = 6400; // ~0.8 c тишины — короткие лупы iOS может игнорировать
       const buf = new ArrayBuffer(44 + n * 2);
       const v = new DataView(buf);
       const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
@@ -27,12 +27,21 @@
     },
 
     unlock() {
+      // iOS 17+: официальный способ не глохнуть от беззвучного переключателя
+      try {
+        if (navigator.audioSession && navigator.audioSession.type !== 'playback') {
+          navigator.audioSession.type = 'playback';
+        }
+      } catch (e) { /* нет API — ниже фолбэк */ }
       if (!this._unlockEl) {
         const a = document.createElement('audio');
         a.setAttribute('playsinline', '');
+        a.setAttribute('webkit-playsinline', '');
         a.loop = true;
         a.preload = 'auto';
         a.src = this._silentURI();
+        a.style.display = 'none';
+        if (document.body) document.body.appendChild(a);
         this._unlockEl = a;
       }
       // важно: сработает только внутри события с активацией (touchend/click)
@@ -75,7 +84,30 @@
 
     resume() {
       // iOS может перевести контекст и в 'interrupted'
-      if (this.ctx && this.ctx.state !== 'running') this.ctx.resume();
+      if (!this.ctx) return;
+      if (this.ctx.state !== 'running') {
+        const p = this.ctx.resume();
+        if (p && p.then) {
+          p.then(() => {
+            // первый успешный запуск — короткий сигнал «звук включился»
+            if (!this._hello) { this._hello = true; this.chime([1046, 1568]); }
+          }).catch(() => {});
+        }
+      } else if (!this._hello) {
+        this._hello = true;
+      }
+    },
+
+    state() {
+      return {
+        ctx: this.ctx ? this.ctx.state : 'none',
+        time: this.ctx ? this.ctx.currentTime.toFixed(1) : '-',
+        rate: this.ctx ? this.ctx.sampleRate : '-',
+        loop: this._unlockEl ? (this._unlockEl.paused ? 'paused' : 'PLAYING') : 'none',
+        kick: !!this._kicked,
+        session: (navigator.audioSession && navigator.audioSession.type) || 'нет API',
+        muted: this.muted,
+      };
     },
 
     setMuted(m) {

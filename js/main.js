@@ -167,6 +167,22 @@
     if (!document.hidden) Snd.resume();
   });
 
+  // диагностика звука: открыть игру с ?debug=1
+  if (/debug/.test(location.search)) {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99;' +
+      'background:rgba(0,0,0,.72);color:#7f7;font:12px/1.5 monospace;' +
+      'padding:6px 9px;border-radius:8px;pointer-events:none;white-space:pre';
+    document.body.appendChild(d);
+    setInterval(() => {
+      const s = Snd.state();
+      d.textContent =
+        'ctx:' + s.ctx + '  t:' + s.time + '  rate:' + s.rate +
+        '\nloop:' + s.loop + '  kick:' + s.kick + '  muted:' + s.muted +
+        '\nsession:' + s.session;
+    }, 500);
+  }
+
   stage.addEventListener('pointerdown', pointerDown);
   addEventListener('pointermove', pointerMove, { passive: true });
   addEventListener('pointerup', pointerUp);
