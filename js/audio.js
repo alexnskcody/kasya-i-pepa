@@ -7,6 +7,38 @@
     _noiseBuf: null,
     _purr: null,
 
+    /* iOS: WebAudio глушится переключателем беззвучного режима, пока
+       аудиосессия в категории ambient. Зацикленный беззвучный <audio>
+       переводит её в playback — звук работает даже с выключенным звонком. */
+    _silentURI() {
+      const rate = 8000, n = 480;
+      const buf = new ArrayBuffer(44 + n * 2);
+      const v = new DataView(buf);
+      const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+      w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt ');
+      v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+      v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
+      v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+      w(36, 'data'); v.setUint32(40, n * 2, true);
+      let bin = '';
+      const u8 = new Uint8Array(buf);
+      for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+      return 'data:audio/wav;base64,' + btoa(bin);
+    },
+
+    unlock() {
+      if (!this._unlockEl) {
+        const a = document.createElement('audio');
+        a.setAttribute('playsinline', '');
+        a.loop = true;
+        a.preload = 'auto';
+        a.src = this._silentURI();
+        this._unlockEl = a;
+      }
+      const p = this._unlockEl.play();
+      if (p && p.catch) p.catch(() => {});
+    },
+
     init() {
       if (this.ctx) return;
       const AC = window.AudioContext || window.webkitAudioContext;
@@ -28,7 +60,8 @@
     },
 
     resume() {
-      if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+      // iOS может перевести контекст и в 'interrupted'
+      if (this.ctx && this.ctx.state !== 'running') this.ctx.resume();
     },
 
     setMuted(m) {

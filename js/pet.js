@@ -17,6 +17,7 @@
       this.target = null;
       this.onArrive = null;
       this.running = false;
+      this.zone = 'floor';        // 'floor' | id места на мебели
       this.busy = false;          // директор занят этим питомцем (сценка)
       this.controlled = false;    // управляется игроком
       this.lookTarget = null;
@@ -136,7 +137,12 @@
     say(text, ms) {
       ms = ms || 900;
       const hp = this.headPoint();
-      FX.bubble(hp.x, hp.y - 26, text, ms);
+      let bx = hp.x;
+      // не даём пузырю вылезти за видимый край
+      if (window.Director && Director.vr && isFinite(Director.vr.x0)) {
+        bx = Math.max(Director.vr.x0 + 120, Math.min(Director.vr.x1 - 120, bx));
+      }
+      FX.bubble(bx, hp.y - 26, text, ms);
       this.talk(Math.min(ms, 650));
     }
 

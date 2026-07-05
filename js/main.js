@@ -33,15 +33,23 @@
   const btnTreat = document.getElementById('btn-treat');
   const btnSound = document.getElementById('btn-sound');
 
+  /* тост-подсказка: HTML, переносит строки, не вылезает за экран */
+  const hintEl = document.getElementById('hint');
+  let hintT = null;
+  function showHint(text) {
+    hintEl.textContent = text;
+    hintEl.classList.add('show');
+    clearTimeout(hintT);
+    hintT = setTimeout(() => hintEl.classList.remove('show'), 2600);
+  }
+
   Director.init({
     cat, dog, world,
     onMeter(v) {
       meterFill.style.width = v + '%';
       meterBox.classList.toggle('full', v >= 100);
     },
-    onHint(text) {
-      FX.bubble(600, Math.max(Director.vr.y0 + 150, 210), text, 2300);
-    },
+    onHint: showHint,
   });
 
   /* видимая область (slice-кадрирование) */
@@ -113,6 +121,14 @@
       Director.tussleTap(pt);
       return;
     }
+    // в режиме Каси тап по дивану/окну/когтеточке — залезть
+    if (Director.mode === 'cat') {
+      const spot = Director.spotAt(pt);
+      if (spot && Director.climbCmd(spot)) {
+        FX.ripple(pt.x, pt.y);
+        return;
+      }
+    }
     if (pt.y > 630) Director.floorTap(pt);
   }
 
@@ -140,6 +156,13 @@
     }
     session = null;
   }
+
+  // любой первый тап (включая кнопки) будит звук; тихий <audio> снимает
+  // блокировку беззвучного переключателя iOS
+  addEventListener('pointerdown', () => { Snd.init(); Snd.unlock(); Snd.resume(); }, { capture: true });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) Snd.resume();
+  });
 
   stage.addEventListener('pointerdown', pointerDown);
   addEventListener('pointermove', pointerMove, { passive: true });
@@ -192,9 +215,7 @@
     if (splash.classList.contains('hidden')) return;
     splash.classList.add('hidden');
     Snd.fanfare();
-    setTimeout(() => {
-      FX.bubble(600, Math.max(Director.vr.y0 + 150, 210), 'Потыкай питомцев! 🐾', 2200);
-    }, 600);
+    setTimeout(() => showHint('Потыкай питомцев! 🐾'), 600);
   }
   document.getElementById('btn-play').addEventListener('click', startGame);
   splash.addEventListener('pointerdown', (e) => {

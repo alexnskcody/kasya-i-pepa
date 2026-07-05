@@ -5,7 +5,25 @@
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-  const TREE = { x: 780, baseY: 782, perchY: 458 };
+  /* Места, куда лазает кошка. safe — пёс не достанет (побег засчитан),
+     на диване (safe:false) пёс догонит: у него есть своя точка dogSpot. */
+  const SPOTS = {
+    tree: {
+      x: 780, y: 458, base: { x: 780, y: 782 }, safe: true, face: -1,
+      region: { x0: 688, y0: 428, x1: 884, y1: 800 },
+    },
+    sill: {
+      // спинка дивана у окна — высоко, псу не допрыгнуть
+      x: 440, y: 462, base: { x: 452, y: 690 }, safe: true, face: -1,
+      region: { x0: 140, y0: 94, x1: 590, y1: 470 },
+    },
+    sofa: {
+      // сиденье дивана — сюда Пепа запрыгнуть может!
+      x: 380, y: 552, base: { x: 402, y: 696 }, safe: false, face: 1,
+      dogSpot: { x: 502, y: 558 },
+      region: { x0: 30, y0: 470, x1: 612, y1: 666 },
+    },
+  };
 
   const Director = {
     cat: null, dog: null, world: null,
@@ -25,6 +43,7 @@
     treat: null,
     _catBatCd: 0,
     _fetchCd: 0,
+    _lerps: [],
 
     init(opts) {
       this.cat = opts.cat;
@@ -63,7 +82,7 @@
     refit() {
       const f = this.floorRect();
       [this.cat, this.dog].forEach((p) => {
-        if (p.busy || this._climb || this._dropAnim) return;
+        if (p.busy || p.zone !== 'floor' || this._lerps.some((L) => L.pet === p)) return;
         if (p.y > 640 && (p.x < f.x0 || p.x > f.x1 || p.y < f.y0 || p.y > f.y1)) {
           const c = this.clampFloor({ x: p.x, y: p.y });
           p.x = c.x; p.y = c.y;
@@ -75,6 +94,120 @@
         this.ball.x = c.x; this.ball.y = c.y;
         this._ballPlace();
       }
+    },
+
+    /* ═══ ЛАЗАНИЕ ПО МЕБЕЛИ ═══ */
+    _tickLerps(dt) {
+      for (let i = this._lerps.length - 1; i >= 0; i--) {
+        const L = this._lerps[i];
+        L.t += dt;
+        const k = Math.min(1, L.t / L.dur);
+        const e = L.down ? k * k : 1 - Math.pow(1 - k, 3);
+        L.pet.x = L.x0 + (L.x1 - L.x0) * (L.down ? k : e);
+        L.pet.y = L.y0 + (L.y1 - L.y0) * e;
+        L.pet.applyTransform();
+        if (k >= 1) {
+          this._lerps.splice(i, 1);
+          if (L.done) L.done();
+        }
+      }
+    },
+
+    _jumpTo(pet, x1, y1, opts) {
+      opts = opts || {};
+      this._lerps = this._lerps.filter((L) => L.pet !== pet);
+      this._lerps.push({
+        pet, x0: pet.x, y0: pet.y, x1, y1, t: 0,
+        dur: opts.dur || 0.5, down: opts.down, done: opts.done,
+      });
+    },
+
+    _finishLerps(pet) {
+      for (let i = this._lerps.length - 1; i >= 0; i--) {
+        const L = this._lerps[i];
+        if (L.pet !== pet) continue;
+        this._lerps.splice(i, 1);
+        pet.x = L.x1; pet.y = L.y1;
+        pet.applyTransform();
+        if (L.done) L.done();
+      }
+    },
+
+    /* дойти до основания и запрыгнуть */
+    climbTo(pet, spotId, opts) {
+      opts = opts || {};
+      const s = SPOTS[spotId];
+      const tx = opts.dogSide ? s.dogSpot.x : s.x;
+      const ty = opts.dogSide ? s.dogSpot.y : s.y;
+      pet.busy = true;
+      pet.moveTo(s.base.x + (opts.dogSide ? 46 : 0), s.base.y, {
+        run: opts.run,
+        cb: () => {
+          FX.dust(pet.x, pet.y - 4);
+          Snd.whoosh();
+          this._jumpTo(pet, tx, ty, {
+            dur: 0.5,
+            done: () => {
+              pet.zone = spotId;
+              pet.stopMove();
+              pet.setPose('sit');
+              if (s.face && !opts.dogSide) pet.setFacing(s.face);
+              FX.sparkle(pet.x, pet.y - 110 * pet.scale(), 3);
+              pet.busy = false;
+              if (opts.done) opts.done();
+            },
+          });
+        },
+      });
+    },
+
+    descend(pet, cb) {
+      const s = SPOTS[pet.zone];
+      if (!s) { if (cb) cb(); return; }
+      pet.busy = true;
+      Snd.whoosh();
+      this._jumpTo(pet, s.base.x + (pet === this.dog ? 56 : -42), s.base.y + 6, {
+        dur: 0.45, down: true,
+        done: () => {
+          pet.zone = 'floor';
+          FX.dust(pet.x, pet.y - 4);
+          Snd.pop();
+          pet.squash();
+          pet.setPose('sit');
+          pet.busy = false;
+          if (cb) cb();
+        },
+      });
+    },
+
+    ensureFloor(pet, cb) {
+      if (pet.zone !== 'floor') this.descend(pet, cb);
+      else cb();
+    },
+
+    /* какое место мебели под точкой тапа (приоритет — верхние) */
+    spotAt(pt) {
+      for (const id of ['sill', 'tree', 'sofa']) {
+        const r = SPOTS[id].region;
+        if (pt.x >= r.x0 && pt.x <= r.x1 && pt.y >= r.y0 && pt.y <= r.y1) return id;
+      }
+      return null;
+    },
+
+    /* команда игрока-Каси: залезть */
+    climbCmd(spotId) {
+      if (this.mode !== 'cat' || this.celebrating) return false;
+      const cat = this.cat;
+      const inChase = this.chase && this.chase.phase === 'chase' && this.chase.playerCat;
+      if (cat.busy && !inChase) return false;
+      if (cat.zone === spotId) return true;
+      this._cleanupIdle(cat);
+      const idle = this._idle[cat.id];
+      idle.kind = null; idle.until = 999;
+      const go = () => this.climbTo(cat, spotId, { run: !!inChase });
+      if (cat.zone !== 'floor') this.descend(cat, go);
+      else go();
+      return true;
     },
 
     /* ═══ ГЛАВНЫЙ ТИК ═══ */
@@ -139,10 +272,18 @@
     },
 
     _catIdle(pet, st) {
+      // слезть с мебели, прежде чем выбирать новое занятие
+      if (pet.zone !== 'floor') {
+        st.kind = 'descend';
+        st.until = 999;
+        this.descend(pet, () => { st.until = 0.4; });
+        return;
+      }
       const prev = st.kind;
       const opts = [
-        { k: 'sit', w: 2.4 }, { k: 'loaf', w: 1.6 }, { k: 'groom', w: 2.2 },
-        { k: 'lieback', w: 2.2 }, { k: 'sleep', w: 1.3 }, { k: 'wander', w: 2.6 },
+        { k: 'sit', w: 2.4 }, { k: 'loaf', w: 1.4 }, { k: 'groom', w: 2.2 },
+        { k: 'lieback', w: 2.2 }, { k: 'sleep', w: 1.3 }, { k: 'wander', w: 2.4 },
+        { k: 'sofaNap', w: 0.8 }, { k: 'sillWatch', w: 0.8 },
       ].filter(o => o.k !== prev);
       const k = this._pick(opts).k;
       st.kind = k;
@@ -152,6 +293,18 @@
         pet.moveTo(p.x, p.y, { cb: () => { st.until = 0.3; } });
       } else if (k === 'sleep') {
         this._sleepIdle(pet, st, rand(11, 17));
+      } else if (k === 'sofaNap') {
+        // залезть на диван и развалиться
+        st.until = 999;
+        this.climbTo(pet, 'sofa', {
+          done: () => { pet.setPose('loaf'); st.until = rand(8, 14); },
+        });
+      } else if (k === 'sillWatch') {
+        // посидеть на подоконнике, глядя в окно
+        st.until = 999;
+        this.climbTo(pet, 'sill', {
+          done: () => { st.until = rand(7, 12); },
+        });
       } else {
         pet.setPose(k);
         st.until = rand(4.5, 8);
@@ -229,7 +382,7 @@
 
       pet.squash();
       if (pet === this.cat) {
-        if (spam && !pet.busy && !pet.controlled) {
+        if (spam && !pet.busy && !pet.controlled && pet.zone === 'floor') {
           pet.setEarsBack(true);
           pet.say('Мя!', 700);
           Snd.meow('angry');
@@ -297,6 +450,7 @@
     teaseReady() {
       return !this.chase && !this.celebrating &&
         !this.cat.busy && !this.dog.busy &&
+        this.cat.zone === 'floor' && this.dog.zone === 'floor' &&
         this.treatEaterIsnt(this.cat) && this.treatEaterIsnt(this.dog);
     },
     treatEaterIsnt(pet) { return !(this.treat && this.treat.eater === pet); },
@@ -308,7 +462,20 @@
       this.dog.busy = this.mode !== 'dog';
       this.chase = { phase: playerIsCat ? 'bop' : 'approach', t: 0, taps: 0 };
       if (playerIsCat) {
-        this._doBop();
+        // кнопка работает с любого расстояния: Кася сама подкрадётся
+        if (dist(this.cat, this.dog) < 150) {
+          this._doBop();
+        } else {
+          this.chase.phase = 'approach';
+          const side = this.cat.x < this.dog.x ? -1 : 1;
+          const goal = this.clampFloor({ x: this.dog.x + side * 116, y: this.dog.y + 4 });
+          this.cat.moveTo(goal.x, goal.y, {
+            pose: 'sneak',
+            cb: () => {
+              if (this.chase && this.chase.phase === 'approach') this._doBop();
+            },
+          });
+        }
       } else {
         const side = this.cat.x < this.dog.x ? -1 : 1;
         const goal = this.clampFloor({ x: this.dog.x + side * 118, y: this.dog.y + 4 });
@@ -402,24 +569,46 @@
       }
 
       if (c.phase === 'chase') {
-        // пёс-ИИ догоняет (в режиме пса догоняет игрок сам)
-        if (!c.playerDog) {
-          const d = dist(this.cat, this.dog);
-          this.dog.speedRun = clamp(305 + (d - 170) * 0.9, 260, 440);
-          if (!this.dog.target || this.now - (c.dogRe || 0) > 0.25) {
-            c.dogRe = this.now;
-            const t = this.clampFloor({ x: this.cat.x, y: this.cat.y });
-            this.dog.moveTo(t.x, t.y, { run: true });
-          }
-          if (Math.random() < dt * 0.7) Snd.bark(1, 1 + Math.random() * 0.2);
-        }
-        const d = dist(this.cat, this.dog);
-        // игрок-кот добежал до когтеточки — спасся!
-        if (c.playerCat && Math.hypot(this.cat.x - TREE.x, this.cat.y - TREE.baseY) < 100) {
+        // кошка добралась до безопасного места — спаслась!
+        if (c.playerCat && (this.cat.zone === 'tree' || this.cat.zone === 'sill')) {
           this._escape(true);
           return;
         }
-        if (d < 80 && c.t > 0.8) this._startTussle();
+        if (c.playerCat && c.t > 1.0 && this.cat.zone === 'floor' &&
+            Math.hypot(this.cat.x - SPOTS.tree.base.x, this.cat.y - SPOTS.tree.base.y) < 100) {
+          this._escape(true);
+          return;
+        }
+        // пёс-ИИ догоняет (в режиме пса догоняет игрок сам)
+        if (!c.playerDog && !c.dogClimb) {
+          if (this.cat.zone === 'sofa' && this.dog.zone !== 'sofa') {
+            // Пепа умеет доставать Касю на диване!
+            c.dogClimb = true;
+            this.climbTo(this.dog, 'sofa', {
+              run: true, dogSide: true,
+              done: () => { c.dogClimb = false; this.dog.busy = true; },
+            });
+          } else if (this.cat.zone !== 'sofa' && this.dog.zone === 'sofa') {
+            c.dogClimb = true;
+            this.descend(this.dog, () => { c.dogClimb = false; this.dog.busy = true; });
+          } else if (this.cat.zone === 'sofa' && this.dog.zone === 'sofa') {
+            if (this.now - (c.dogRe || 0) > 0.3) {
+              c.dogRe = this.now;
+              this.dog.moveTo(this.cat.x + 40, this.cat.y + 2, {});
+            }
+          } else {
+            const d0 = dist(this.cat, this.dog);
+            this.dog.speedRun = clamp(305 + (d0 - 170) * 0.9, 260, 440);
+            if (!this.dog.target || this.now - (c.dogRe || 0) > 0.25) {
+              c.dogRe = this.now;
+              const t = this.clampFloor({ x: this.cat.x, y: this.cat.y });
+              this.dog.moveTo(t.x, t.y, { run: true });
+            }
+            if (Math.random() < dt * 0.7) Snd.bark(1, 1 + Math.random() * 0.2);
+          }
+        }
+        const d = dist(this.cat, this.dog);
+        if (d < 80 && c.t > 0.8 && this.cat.zone === this.dog.zone) this._startTussle();
         else if (!c.playerCat && !c.playerDog && c.t > 9) this._startTussle(); // страховка
       }
 
@@ -433,11 +622,15 @@
       const c = this.chase; if (!c || c.phase === 'tussle') return;
       c.phase = 'tussle'; c.t = 0; c.taps = 0;
       this.cat.stopMove(); this.dog.stopMove();
-      const mid = this.clampFloor({
-        x: (this.cat.x + this.dog.x) / 2,
-        y: Math.max(this.cat.y, this.dog.y),
-      });
+      const onSofa = this.cat.zone === 'sofa';
+      const mid = onSofa
+        ? { x: clamp((this.cat.x + this.dog.x) / 2, 120, 560), y: 560 }
+        : this.clampFloor({
+            x: (this.cat.x + this.dog.x) / 2,
+            y: Math.max(this.cat.y, this.dog.y),
+          });
       c.cloudPos = mid;
+      c.onSofa = onSofa;
       this.cat.setHidden(true); this.dog.setHidden(true);
       document.getElementById('speedlines').classList.add('hidden');
       c.cloud = FX.tussleCloud(mid.x, mid.y - 40);
@@ -458,44 +651,51 @@
       this.addMeter('tussletap', 1);
     },
 
-    _escape(reachedTree) {
+    _escape(reachedSafe) {
       const c = this.chase; if (!c) return;
       if (c.rattleIv) clearInterval(c.rattleIv);
       if (c.cloud) { c.cloud.end(); c.cloud = null; }
       document.getElementById('speedlines').classList.add('hidden');
+      const wasPlayerCat = !!c.playerCat;
       const from = c.cloudPos || { x: this.cat.x, y: this.cat.y };
       this.cat.setHidden(false); this.dog.setHidden(false);
-      this.chase = { phase: 'escape', t: 0 };
+      this._idle[this.cat.id].until = 999;
+      this.chase = { phase: 'escape', t: 0, playerCat: wasPlayerCat };
 
-      if (!reachedTree) {
-        this.cat.x = from.x - 30; this.cat.y = from.y;
-        this.dog.x = clamp(from.x + 40, this.floorRect().x0, this.floorRect().x1);
-        this.dog.y = from.y;
+      if (!reachedSafe) {
+        // выкатились из потасовки (с дивана — к его подножию)
+        const sofaBase = this.cat.zone === 'sofa' ? SPOTS.sofa.base : null;
+        const px = sofaBase ? sofaBase.x : from.x;
+        const py = sofaBase ? sofaBase.y : from.y;
+        this.cat.zone = 'floor'; this.dog.zone = 'floor';
+        this.cat.x = px - 30; this.cat.y = py;
+        this.dog.x = clamp(px + 44, this.floorRect().x0, this.floorRect().x1);
+        this.dog.y = py;
         this.cat.applyTransform(); this.dog.applyTransform();
+        if (sofaBase) FX.dust(px, py - 6);
       }
       Snd.meow('angry');
       Snd.whoosh();
 
-      // кот взлетает на когтеточку
-      const base = this.clampFloor({ x: TREE.x, y: TREE.baseY });
+      // куда убегает/убежала кошка
+      const safeSpot = (this.cat.zone === 'tree' || this.cat.zone === 'sill') ? this.cat.zone : 'tree';
       this.cat.setEarsBack(true);
       this.cat.speedRun = 430;
-      this.cat.moveTo(base.x, base.y, {
-        run: true,
-        cb: () => {
-          // «прыжок» на платформу
-          FX.dust(TREE.x, TREE.baseY - 6);
-          Snd.whoosh();
-          const climb = { t: 0, y0: this.cat.y };
-          this._climb = climb;
-          this.cat.busy = true;
-        },
-      });
+      if (this.cat.zone === safeSpot) {
+        this._victoryPerch(wasPlayerCat);
+      } else {
+        this.climbTo(this.cat, safeSpot, {
+          run: true,
+          done: () => this._victoryPerch(wasPlayerCat),
+        });
+        this.cat.busy = true;
+      }
 
-      // пёс подбегает к дереву и гордо виляет
+      // пёс подбегает к укрытию и гордо виляет
       if (this.mode !== 'dog') {
+        const sBase = SPOTS[safeSpot].base;
         setTimeout(() => {
-          const p = this.clampFloor({ x: TREE.x - 90, y: TREE.baseY + 10 });
+          const p = this.clampFloor({ x: sBase.x - 90, y: sBase.y + 10 });
           this.dog.moveTo(p.x, p.y, {
             run: true,
             cb: () => {
@@ -513,64 +713,37 @@
           });
         }, 500);
       } else {
-        this.hintCb('Кася удрала на когтеточку! 😸');
+        this.hintCb('Кася удрала — не достать! 😸');
       }
 
       this.addMeter('chaseEnd', 8);
       this.nextTease = this.now + (this.mode === 'dog' ? rand(12, 24) : rand(20, 42));
     },
 
-    _tickClimb(dt) {
-      if (!this._climb) return;
-      const cl = this._climb;
-      cl.t += dt;
-      const k = Math.min(1, cl.t / 0.55);
-      const ease = 1 - Math.pow(1 - k, 3);
-      this.cat.y = cl.y0 + (TREE.perchY - cl.y0) * ease;
-      this.cat.x = TREE.x;
-      this.cat.applyTransform();
-      if (k >= 1) {
-        this._climb = null;
-        this.cat.setEarsBack(false);
-        this.cat.speedRun = 320;
-        this.cat.setPose('groom');
-        FX.sparkle(TREE.x, TREE.perchY - 90, 6);
-        Snd.chime();
-        if (this.chase && this.chase.playerCat) {
-          FX.confetti(24);
-          this.addMeter('treeWin', 10);
+    _victoryPerch(wasPlayerCat) {
+      const cat = this.cat;
+      cat.busy = true;
+      cat.setEarsBack(false);
+      cat.speedRun = 320;
+      cat.setPose('groom');
+      FX.sparkle(cat.x, cat.y - 100 * cat.scale(), 6);
+      Snd.chime();
+      if (wasPlayerCat) {
+        FX.confetti(24);
+        this.addMeter('treeWin', 10);
+      }
+      this.chase = null;
+      // посидит наверху и спрыгнет
+      setTimeout(() => {
+        if (cat.zone !== 'floor' && cat.busy && !this.celebrating) {
+          this.descend(cat, () => {
+            cat.busy = false;
+            this._idle[cat.id].until = rand(1, 3);
+          });
+        } else {
+          cat.busy = false;
         }
-        this.chase = null;
-        // посидит на дереве и спрыгнет
-        setTimeout(() => this._perchDone(), rand(4500, 8000));
-      }
-    },
-
-    _perchDone() {
-      if (this._climb) return;
-      const down = this.clampFloor({ x: TREE.x - 60, y: TREE.baseY + 16 });
-      const drop = { t: 0, x0: this.cat.x, y0: this.cat.y, x1: down.x, y1: down.y };
-      this._dropAnim = drop;
-      Snd.whoosh();
-    },
-
-    _tickDrop(dt) {
-      if (!this._dropAnim) return;
-      const d = this._dropAnim;
-      d.t += dt;
-      const k = Math.min(1, d.t / 0.45);
-      this.cat.x = d.x0 + (d.x1 - d.x0) * k;
-      this.cat.y = d.y0 + (d.y1 - d.y0) * (k * k); // ускоряется вниз
-      this.cat.applyTransform();
-      if (k >= 1) {
-        this._dropAnim = null;
-        FX.dust(this.cat.x, this.cat.y - 4);
-        Snd.pop();
-        this.cat.squash();
-        this.cat.busy = false;
-        this.cat.setPose('sit');
-        this._idle[this.cat.id].until = rand(1, 3);
-      }
+      }, wasPlayerCat ? 2600 : rand(4500, 8000));
     },
 
     abortChase() {
@@ -582,8 +755,9 @@
         this.cat.setHidden(false); this.dog.setHidden(false);
       }
       this.chase = null;
-      this._climb = null;
-      this._dropAnim = null;
+      // дожимаем незаконченные прыжки, чтобы никто не завис в воздухе
+      this._finishLerps(this.cat);
+      this._finishLerps(this.dog);
       if (this.ball && this.ball.carrier) {
         const p = this.ball.carrier;
         this.ball.carrier = null;
@@ -594,8 +768,13 @@
       this.cat.setEarsBack(false);
       this.cat.stopMove(); this.dog.stopMove();
       this.cat.speedRun = 320; this.dog.speedRun = 305;
-      if (this.cat.y < 660) { this.cat.y = 700; this.cat.x = TREE.x - 60; this.cat.applyTransform(); }
-      this.cat.setPose('sit'); this.dog.setPose('sit');
+      if (this.cat.zone === 'floor' && this.cat.y < 660) {
+        this.cat.y = 700; this.cat.x = SPOTS.tree.base.x - 60;
+        this.cat.applyTransform();
+      }
+      if (this.dog.zone !== 'floor') this.descend(this.dog);
+      if (this.cat.zone === 'floor') this.cat.setPose('sit');
+      this.dog.setPose('sit');
       this._idle[this.cat.id].until = 1;
       this._idle[this.dog.id].until = 1.5;
     },
@@ -748,8 +927,8 @@
       Snd.pop();
       this.treat = { x: p.x, y: p.y, el: g, eater: null };
 
-      // ближайший свободный питомец бежит к угощению
-      const options = [this.cat, this.dog].filter(pt => !pt.busy && !(this.chase));
+      // ближайший свободный питомец бежит к угощению (кто на мебели — не претендует)
+      const options = [this.cat, this.dog].filter(pt => !pt.busy && pt.zone === 'floor' && !(this.chase));
       if (!options.length) { setTimeout(() => this._treatGone(), 6000); return true; }
       options.sort((a, b) => dist(a, p) - dist(b, p));
       // питомец игрока получает угощение первым — он его и просил!
@@ -795,11 +974,13 @@
     /* ═══ КНОПКИ ДЕЙСТВИЙ ═══ */
     actionState() {
       if (this.mode === 'cat') {
-        const near = dist(this.cat, this.dog) < 190;
+        const near = dist(this.cat, this.dog) < 230;
+        const canFromSpot = this.cat.zone !== 'floor' && !this.cat.busy &&
+          !this.chase && !this.celebrating && this.dog.zone === 'floor';
         return {
           label: '😼 БАП!',
           visible: true,
-          enabled: near && this.teaseReady() && !this.cat.busy,
+          enabled: this.teaseReady() || canFromSpot,
           attention: near && this.teaseReady(),
         };
       }
@@ -811,15 +992,21 @@
 
     doAction() {
       if (this.mode === 'cat') {
-        if (this.actionState().enabled) this.startTease(true);
+        if (!this.actionState().enabled) return;
+        if (this.cat.zone !== 'floor') {
+          this.descend(this.cat, () => this.startTease(true));
+        } else {
+          this.startTease(true);
+        }
       } else if (this.mode === 'dog') {
         Snd.bark(2);
         this.dog.say('Гав!', 600);
         this.dog.setTailWag(true);
         clearTimeout(this.dog._wagT);
         this.dog._wagT = setTimeout(() => this.dog.setTailWag(false), 1500);
-        if (!this.chase && !this.cat.busy && dist(this.cat, this.dog) < 300) {
-          // кот фыркает и отпрыгивает
+        if (!this.chase && !this.cat.busy && this.cat.zone === 'floor' &&
+            dist(this.cat, this.dog) < 300) {
+          // кошка фыркает и отпрыгивает
           this._cleanupIdle(this.cat);
           const idle = this._idle[this.cat.id];
           idle.kind = 'scared'; idle.until = 99;
@@ -872,9 +1059,18 @@
       const p = this.clampFloor(pt);
       const hero = this.mode === 'cat' ? this.cat : this.mode === 'dog' ? this.dog : null;
       if (!hero) return;
-      if (hero.busy && !(this.chase && this.chase.phase === 'chase')) return;
-      const far = dist(hero, p) > 300;
       const inChase = this.chase && this.chase.phase === 'chase';
+      if (hero.busy && !inChase) return;
+      if (hero.zone !== 'floor') {
+        // сначала спрыгнуть с мебели
+        this._cleanupIdle(hero);
+        this.descend(hero, () => {
+          hero.moveTo(p.x, p.y, { run: inChase || dist(hero, p) > 300 });
+        });
+        FX.ripple(p.x, p.y);
+        return;
+      }
+      const far = dist(hero, p) > 300;
       hero.moveTo(p.x, p.y, {
         run: far || inChase,
         cb: () => {
@@ -942,8 +1138,16 @@
           this._idle[this.dog.id].until = 1.5;
         }, 3000);
       };
-      this.cat.moveTo(cx - 62, cy, { run: true, cb: done });
-      this.dog.moveTo(cx + 62, cy, { run: true, cb: done });
+      this._idle[this.cat.id].until = 999;
+      this._idle[this.dog.id].until = 999;
+      this.ensureFloor(this.cat, () => {
+        this.cat.busy = true;
+        this.cat.moveTo(cx - 62, cy, { run: true, cb: done });
+      });
+      this.ensureFloor(this.dog, () => {
+        this.dog.busy = true;
+        this.dog.moveTo(cx + 62, cy, { run: true, cb: done });
+      });
     },
 
     /* ═══ ФОН ═══ */
@@ -958,8 +1162,7 @@
         this.nextTease = this.now + 60; // защита от повторного входа
         this.startTease(false);
       }
-      this._tickClimb(dt);
-      this._tickDrop(dt);
+      this._tickLerps(dt);
     },
 
     _zSort() {
