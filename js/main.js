@@ -178,6 +178,11 @@
 
   // диагностика звука: открыть игру с ?debug=1
   if (/debug/.test(location.search)) {
+    // версия — из ?v= собственных скриптов; время сборки — Last-Modified
+    // страницы (GitHub Pages ставит его при деплое)
+    const verEl = document.querySelector('script[src*="main.js"]');
+    const verM = verEl && verEl.getAttribute('src').match(/v=([\w.]+)/);
+    const APP_VER = verM ? 'v' + verM[1] : '?';
     const d = document.createElement('div');
     d.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99;max-width:94vw;' +
       'background:rgba(0,0,0,.72);color:#7f7;font:12px/1.5 monospace;' +
@@ -187,7 +192,8 @@
     setInterval(() => {
       const s = Snd.state();
       d.textContent =
-        'ctx:' + s.ctx + '  t:' + s.time + '  rate:' + s.rate +
+        APP_VER + ' · сборка ' + document.lastModified +
+        '\nctx:' + s.ctx + '  t:' + s.time + '  rate:' + s.rate +
         '\nloop:' + s.loop + '  kick:' + s.kick + '  muted:' + s.muted +
         '\nsession:' + s.session +
         '\nAC:' + (s.AC ? 'есть' : 'НЕТ (Lockdown?)') + '  fb:' + s.fb +
